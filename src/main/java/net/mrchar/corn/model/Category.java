@@ -8,7 +8,6 @@ import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.LocalDateTime;
-import java.util.UUID;
 
 @Getter
 @Setter
@@ -17,9 +16,9 @@ import java.util.UUID;
 @EntityListeners(AuditingEntityListener.class)
 public class Category {
     @Id
-    @Column(name = "id")
-    @GeneratedValue(strategy = GenerationType.UUID)
-    private UUID id;
+    @Column(name = "id", columnDefinition = "bigint")
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
 
     @Column(name = "code")
     private String code;
@@ -41,8 +40,9 @@ public class Category {
     public Category() {
     }
 
-    public Category(String code, String name) {
+    public Category(String code, String name, String unit) {
         this.code = code;
         this.name = name;
+        this.unit = unit;
     }
 }
