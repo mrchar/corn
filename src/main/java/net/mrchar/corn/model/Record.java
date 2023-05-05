@@ -3,31 +3,17 @@ package net.mrchar.corn.model;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
-import org.springframework.data.annotation.CreatedDate;
-import org.springframework.data.annotation.LastModifiedDate;
-
-import java.time.LocalDateTime;
-import java.util.UUID;
+import net.mrchar.corn.model.base.AuditableEntity;
 
 @Getter
 @Setter
 @Entity
 @Table(name = "record")
-public class Record {
-    @Id
-    @Column(name = "id")
-    @GeneratedValue(strategy = GenerationType.UUID)
-    private UUID id;
-
+public class Record extends AuditableEntity {
     @ManyToOne
     @JoinColumn(name = "quota_id")
     private Quota quota;
 
-    @CreatedDate
-    @Column(name = "created", columnDefinition = "TIMESTAMP")
-    private LocalDateTime created;
-
-    @LastModifiedDate
-    @Column(name = "modified", columnDefinition = "TIMESTAMP")
-    private LocalDateTime modified;
+    @Column(name = "amount")
+    private Double amount;
 }

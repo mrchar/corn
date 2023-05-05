@@ -36,8 +36,8 @@ public class Application {
         long count1 = this.categories.count();
         if (count1 < 1) {
             List<Category> categories = List.of(
-                    new Category("human", "人力"),
-                    new Category("money", "资金"));
+                    new Category("human", "人力", "人天"),
+                    new Category("money", "资金", "元"));
             this.categories.saveAll(categories);
         }
     }

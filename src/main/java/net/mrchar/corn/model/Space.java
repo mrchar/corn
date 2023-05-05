@@ -1,39 +1,20 @@
 package net.mrchar.corn.model;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
 import lombok.Getter;
-import lombok.Setter;
-import org.springframework.data.annotation.CreatedDate;
-import org.springframework.data.annotation.LastModifiedDate;
-import org.springframework.data.jpa.domain.support.AuditingEntityListener;
-
-import java.time.LocalDateTime;
-import java.util.UUID;
+import net.mrchar.corn.model.base.AuditableEntity;
 
 @Getter
-@Setter
 @Entity
 @Table(name = "space")
-@EntityListeners(AuditingEntityListener.class)
-public class Space {
-    @Id
-    @Column(name = "id")
-    @GeneratedValue(strategy = GenerationType.UUID)
-    private UUID id;
-
+public class Space extends AuditableEntity {
     @Column(name = "code")
     private String code;
 
     @Column(name = "name")
     private String name;
-
-    @CreatedDate
-    @Column(name = "created")
-    private LocalDateTime created;
-
-    @LastModifiedDate
-    @Column(name = "modified")
-    private LocalDateTime modified;
 
     public Space() {
     }

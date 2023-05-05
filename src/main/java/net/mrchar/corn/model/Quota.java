@@ -2,23 +2,12 @@ package net.mrchar.corn.model;
 
 import jakarta.persistence.*;
 import lombok.Getter;
-import lombok.Setter;
-import org.springframework.data.annotation.CreatedDate;
-import org.springframework.data.annotation.LastModifiedDate;
-
-import java.time.LocalDateTime;
-import java.util.UUID;
+import net.mrchar.corn.model.base.AuditableEntity;
 
 @Getter
-@Setter
 @Entity
 @Table(name = "quota")
-public class Quota {
-    @Id
-    @Column(name = "id")
-    @GeneratedValue(strategy = GenerationType.UUID)
-    private UUID id;
-
+public class Quota extends AuditableEntity {
     @ManyToOne
     @JoinColumn(name = "budge_id")
     private Budget budget;
@@ -29,12 +18,4 @@ public class Quota {
 
     @Column(name = "amount")
     private Double amount;
-
-    @CreatedDate
-    @Column(name = "created", columnDefinition = "TIMESTAMP")
-    private LocalDateTime created;
-
-    @LastModifiedDate
-    @Column(name = "modified", columnDefinition = "TIMESTAMP")
-    private LocalDateTime modified;
 }

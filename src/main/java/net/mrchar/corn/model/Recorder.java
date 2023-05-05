@@ -3,23 +3,16 @@ package net.mrchar.corn.model;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
-import org.springframework.data.annotation.CreatedDate;
-import org.springframework.data.annotation.LastModifiedDate;
+import net.mrchar.corn.model.base.AuditableEntity;
+import net.mrchar.corn.model.element.Label;
 
-import java.time.LocalDateTime;
 import java.util.Set;
-import java.util.UUID;
 
 @Getter
 @Setter
 @Entity
 @Table(name = "recorder")
-public class Recorder {
-    @Id
-    @Column(name = "id")
-    @GeneratedValue(strategy = GenerationType.UUID)
-    private UUID id;
-
+public class Recorder extends AuditableEntity {
     @ManyToOne
     @JoinColumn(name = "category")
     private Category category;
@@ -42,12 +35,4 @@ public class Recorder {
 
     @Column(name = "config", columnDefinition = "LONGTEXT")
     private String config;
-
-    @CreatedDate
-    @Column(name = "created", columnDefinition = "TIMESTAMP")
-    private LocalDateTime created;
-
-    @LastModifiedDate
-    @Column(name = "modified", columnDefinition = "TIMESTAMP")
-    private LocalDateTime modified;
 }
