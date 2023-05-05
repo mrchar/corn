@@ -1,2 +1,8 @@
 plugins {
+    id 'com.github.node-gradle.node' version '4.0.0'
+}
+
+tasks.register('yarnBuild', YarnTask) {
+    group = 'yarn'
+    args = ['build']
 }
