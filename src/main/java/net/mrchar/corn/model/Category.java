@@ -1,25 +1,15 @@
 package net.mrchar.corn.model;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
 import lombok.Getter;
-import lombok.Setter;
-import org.springframework.data.annotation.CreatedDate;
-import org.springframework.data.annotation.LastModifiedDate;
-import org.springframework.data.jpa.domain.support.AuditingEntityListener;
-
-import java.time.LocalDateTime;
+import net.mrchar.corn.model.base.AuditableEntity;
 
 @Getter
-@Setter
 @Entity
 @Table(name = "category")
-@EntityListeners(AuditingEntityListener.class)
-public class Category {
-    @Id
-    @Column(name = "id", columnDefinition = "bigint")
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
+public class Category extends AuditableEntity {
     @Column(name = "code")
     private String code;
 
@@ -28,14 +18,6 @@ public class Category {
 
     @Column(name = "unit")
     private String unit;
-
-    @CreatedDate
-    @Column(name = "created", columnDefinition = "TIMESTAMP")
-    private LocalDateTime created;
-
-    @LastModifiedDate
-    @Column(name = "modified", columnDefinition = "TIMESTAMP")
-    private LocalDateTime modified;
 
     public Category() {
     }

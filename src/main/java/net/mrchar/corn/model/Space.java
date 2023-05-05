@@ -1,39 +1,20 @@
 package net.mrchar.corn.model;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
 import lombok.Getter;
-import org.springframework.data.annotation.CreatedDate;
-import org.springframework.data.annotation.LastModifiedDate;
-import org.springframework.data.jpa.domain.support.AuditingEntityListener;
-
-import java.time.LocalDateTime;
+import net.mrchar.corn.model.base.AuditableEntity;
 
 @Getter
 @Entity
 @Table(name = "space")
-@EntityListeners(AuditingEntityListener.class)
-public class Space {
-    @Id
-    @Column(name = "id", columnDefinition = "bigint")
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
+public class Space extends AuditableEntity {
     @Column(name = "code")
     private String code;
 
     @Column(name = "name")
     private String name;
-
-    @JsonIgnore
-    @CreatedDate
-    @Column(name = "created")
-    private LocalDateTime created;
-
-    @JsonIgnore
-    @LastModifiedDate
-    @Column(name = "modified")
-    private LocalDateTime modified;
 
     public Space() {
     }

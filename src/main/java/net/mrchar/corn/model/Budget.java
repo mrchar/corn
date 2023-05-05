@@ -2,25 +2,15 @@ package net.mrchar.corn.model;
 
 import jakarta.persistence.*;
 import lombok.Getter;
-import lombok.Setter;
-import org.springframework.data.annotation.CreatedDate;
-import org.springframework.data.annotation.LastModifiedDate;
-import org.springframework.data.jpa.domain.support.AuditingEntityListener;
+import net.mrchar.corn.model.base.AuditableEntity;
+import net.mrchar.corn.model.element.Label;
 
-import java.time.LocalDateTime;
 import java.util.Set;
 
 @Getter
-@Setter
 @Entity
 @Table(name = "budget")
-@EntityListeners(AuditingEntityListener.class)
-public class Budget {
-    @Id
-    @Column(name = "id", columnDefinition = "bigint")
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
+public class Budget extends AuditableEntity {
     @ManyToOne
     @JoinColumn(name = "category_id")
     private Category category;
@@ -35,12 +25,4 @@ public class Budget {
 
     @Column(name = "amount")
     private Double amount;
-
-    @CreatedDate
-    @Column(name = "created", columnDefinition = "TIMESTAMP")
-    private LocalDateTime created;
-
-    @LastModifiedDate
-    @Column(name = "modified", columnDefinition = "TIMESTAMP")
-    private LocalDateTime modified;
 }

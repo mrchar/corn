@@ -1,4 +1,4 @@
-package net.mrchar.corn.model;
+package net.mrchar.corn.model.element;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Embeddable;
