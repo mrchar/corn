@@ -1,36 +1,41 @@
 plugins {
-    id 'java'
-    id 'org.springframework.boot' version '3.0.6'
-    id 'io.spring.dependency-management' version '1.1.0'
+    id 'base'
+    id 'me.qoomon.git-versioning' version '6.4.2'
 }
 
-group = 'net.mrchar'
-version = '0.0.1-SNAPSHOT'
-sourceCompatibility = '17'
+allprojects {
+    apply plugin: 'me.qoomon.git-versioning'
 
-configurations {
-    compileOnly {
-        extendsFrom annotationProcessor
+    group = 'net.mrchar'
+    version = 'unversioned-SNAPSHOT'
+
+    gitVersioning.apply {
+        refs {
+            considerTagsOnBranches = true
+            branch('release/v(?<version>.+)') {
+                version = '${ref.version}-SNAPSHOT+${commit.short}'
+            }
+            tag('v(?<version>[.\\d]+)\\-alpha') {
+                version = '${ref.version}-alpha+${commit.short}'
+            }
+            tag('v(?<version>[.\\d]+)\\-beta') {
+                version = '${ref.version}-beta+${commit.short}'
+            }
+            tag('v(?<version>[.\\d]+)') {
+                version = '${ref.version}+${commit.short}'
+            }
+        }
+
+        // optional fallback configuration in case of no matching ref configuration
+        rev {
+            version = 'unversioned+${commit.short}'
+        }
+    }
+
+    repositories {
+        mavenLocal()
+        mavenCentral()
     }
 }
 
-repositories {
-    mavenCentral()
-}
 
-dependencies {
-    implementation 'org.springframework.boot:spring-boot-starter-web'
-    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    implementation 'org.springframework.boot:spring-boot-starter-data-rest'
-    implementation 'org.springframework.data:spring-data-rest-hal-explorer'
-    runtimeOnly 'com.h2database:h2'
-    compileOnly 'org.projectlombok:lombok'
-    annotationProcessor 'org.projectlombok:lombok'
-    developmentOnly 'org.springframework.boot:spring-boot-devtools'
-    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
-    testImplementation 'org.springframework.boot:spring-boot-starter-test'
-}
-
-tasks.named('test') {
-    useJUnitPlatform()
-}
