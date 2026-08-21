@@ -1,0 +1,10 @@
+{
+  "name": "corn-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @corn/web dev",
+    "build": "pnpm --filter @corn/web build",
+    "lint": "pnpm -r run lint 2>/dev/null || true"
+  }
+}

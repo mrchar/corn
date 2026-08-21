@@ -1,0 +1,19 @@
+[package]
+name = "corn-core"
+description = "Corn 业务逻辑内核：领域模型、服务、仓储"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+utoipa.workspace = true

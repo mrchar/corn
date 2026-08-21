@@ -1,0 +1,43 @@
+[workspace]
+members = [
+    "crates/corn-core",
+    "crates/corn-server",
+    "crates/corn-tauri",
+]
+default-members = ["crates/corn-core", "crates/corn-server"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Corn Contributors"]
+license = "MIT"
+repository = "https://github.com/mrchar/corn"
+
+[workspace.dependencies]
+corn-core = { path = "crates/corn-core" }
+anyhow = "1"
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.7", default-features = false, features = [
+    "any",
+    "postgres",
+    "sqlite",
+    "runtime-tokio-rustls",
+    "macros",
+    "migrate",
+    "uuid",
+    "chrono",
+    "json",
+] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+utoipa = { version = "4", features = ["axum_extras", "chrono", "uuid"] }
+utoipa-swagger-ui = { version = "7", features = ["axum"] }
