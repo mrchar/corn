@@ -304,11 +304,13 @@ export function createCornClient(
     opts.baseUrl ??
     (typeof process !== "undefined" ? process.env.CORN_API_URL : undefined) ??
     "http://localhost:8080";
-  const token =
-    opts.token ?? (typeof process !== "undefined" ? process.env.AUTH_TOKEN : undefined);
+  const envToken =
+    typeof process !== "undefined" ? process.env.AUTH_TOKEN : undefined;
+  // 空字符串视为未设置，避免误把空 AUTH_TOKEN 当作有效凭证。
+  const token = opts.token ?? (envToken && envToken.length > 0 ? envToken : undefined);
   return new CornClient({
     baseUrl,
-    token: token ?? undefined,
+    token,
     tenantId: opts.tenantId,
   });
 }

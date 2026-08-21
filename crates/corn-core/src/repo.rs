@@ -651,3 +651,47 @@ impl Repo {
             .ok_or_else(|| RepoError::NotFound(format!("recorder #{id}")))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{labels_json, parse_labels};
+    use crate::Label;
+
+    #[test]
+    fn parse_labels_handles_none_and_empty() {
+        assert!(parse_labels(None).is_empty());
+        assert!(parse_labels(Some(String::new())).is_empty());
+        assert!(parse_labels(Some("garbage".into())).is_empty());
+    }
+
+    #[test]
+    fn parse_labels_parses_valid_array() {
+        let raw = r#"[{"key":"a","value":"1"},{"key":"b","value":"2"}]"#;
+        let labels = parse_labels(Some(raw.into()));
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels[0].key, "a");
+        assert_eq!(labels[1].value, "2");
+    }
+
+    #[test]
+    fn labels_json_round_trips() {
+        let labels = vec![
+            Label {
+                key: "k".into(),
+                value: "v".into(),
+            },
+            Label {
+                key: "k2".into(),
+                value: "v2".into(),
+            },
+        ];
+        let json = labels_json(&labels);
+        let parsed = parse_labels(Some(json));
+        assert_eq!(parsed, labels);
+    }
+
+    #[test]
+    fn labels_json_handles_empty_slice() {
+        assert_eq!(labels_json(&[]), "[]");
+    }
+}

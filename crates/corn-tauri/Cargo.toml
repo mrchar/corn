@@ -8,6 +8,10 @@ license.workspace = true
 repository.workspace = true
 
 # Tauri 依赖将在 M4 阶段引入；当前为占位二进制以保证 workspace 可编译。
+[lib]
+name = "corn_tauri"
+path = "src/lib.rs"
+
 [[bin]]
 name = "corn-tauri"
 path = "src/main.rs"
@@ -17,3 +21,6 @@ corn-core.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }

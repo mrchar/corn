@@ -1,16 +1,10 @@
 //! corn-server 入口（SaaS / 私有化部署形态）
 
-mod dto;
-mod error;
-mod middleware;
-mod openapi;
-mod routes;
-mod state;
-
 use std::sync::Arc;
 
 use corn_core::{schema, Services};
-use state::{AppState, Config};
+use corn_server::state::{AppState, Config};
+use corn_server::{openapi, routes};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use utoipa::OpenApi;
