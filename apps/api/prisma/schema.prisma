@@ -1,0 +1,225 @@
+// 资源管理云服务 · 数据模型
+// 数据库：SQLite（MVP 阶段）。迁移到 PostgreSQL 时，Json 字段可换用原生 JSON 类型。
+// 约定：凡标注「JSON」的字段在 SQLite 下以字符串存放，读写由 JSON 编解码助手完成。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// 空间：完全隔离的边界，也是接口路径前缀的载体
+model Space {
+  id        String   @id
+  name      String
+  code      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  domains     Domain[]
+  types       ResourceType[]
+  resources   Resource[]
+  entries     LedgerEntry[]
+  reservations Reservation[]
+  templateSettings SpaceTemplateSetting[]
+}
+
+/// 领域：空间内的分区，资源归属与类型定义的最小单位
+model Domain {
+  id        String   @id
+  spaceId   String
+  name      String
+  code      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  space     Space          @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  types     ResourceType[]
+  resources Resource[]
+
+  @@unique([spaceId, code])
+  @@index([spaceId])
+}
+
+/// 内建资源模板：系统预置的只读资源定义，覆盖全部组织对象
+model BuiltinTemplate {
+  id          String @id
+  code        String @unique
+  name        String
+  description String
+  /// 投影源类型：member / group / domain / space（MVP 仅登记，不驱动同步）
+  projectionSubject String
+  unit        String
+  numericScale Int    @default(0)
+  divisible   Boolean @default(true)
+  allowNegative Boolean @default(false)
+  /// JSON：属性模式 [{ key, label, valueType, required, options, validators }]
+  attrSchema  String @default("[]")
+  /// JSON：允许的来源类别 ["manual","timed","event","builtin"]
+  sourceKinds String @default("[]")
+  /// JSON：允许的去向类别 ["manual","wear","event","builtin"]
+  sinkKinds   String @default("[]")
+  /// JSON：推荐标签键 ["location","area"]
+  recommendedTagKeys String @default("[]")
+  createdAt   DateTime @default(now())
+
+  spaceSettings SpaceTemplateSetting[]
+  derivedTypes  ResourceType[]
+}
+
+/// 空间对某个内建模板的启用配置；由空间管理员决定
+model SpaceTemplateSetting {
+  spaceId    String
+  templateId String
+  enabled    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  space    Space           @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  template BuiltinTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@id([spaceId, templateId])
+}
+
+/// 资源类型：元模型定义；内建模板「继承」或「改写」后同样落为资源类型
+model ResourceType {
+  id        String @id
+  spaceId   String
+  domainId  String
+  /// 接口路径段使用的编码
+  code      String
+  name      String
+  description String @default("")
+
+  unit         String
+  numericScale Int     @default(0)
+  divisible    Boolean @default(true)
+  allowNegative Boolean @default(false)
+
+  /// JSON：属性模式，同 BuiltinTemplate.attrSchema
+  attrSchema  String @default("[]")
+  /// JSON：允许的来源类别
+  sourceKinds String @default("[]")
+  /// JSON：允许的去向类别
+  sinkKinds   String @default("[]")
+  /// JSON：推荐标签键
+  recommendedTagKeys String @default("[]")
+
+  /// 来源：custom（领域自定义）/ builtin-inherited（继承模板）/ builtin-rewritten（改写模板）
+  origin     String  @default("custom")
+  templateId String?
+  /// active / disabled：停用后不阻止既有资源，仅阻止新建
+  status     String  @default("active")
+  /// 是否已有资源实例；为真时冻结影响数据口径的类型要素
+  inUse      Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  space     Space            @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  domain    Domain           @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  template  BuiltinTemplate? @relation(fields: [templateId], references: [id])
+  resources Resource[]
+
+  @@unique([spaceId, code])
+  @@index([spaceId, domainId])
+}
+
+/// 资源实例：某类型下的一个「账户」
+model Resource {
+  id       String  @id
+  spaceId  String
+  domainId String
+  groupId  String?
+  typeId   String
+  name     String
+  /// JSON：业务属性，依类型 attrSchema
+  attrs    String  @default("{}")
+  /// active / archived
+  status   String  @default("active")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  space        Space         @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  domain       Domain        @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  type         ResourceType  @relation(fields: [typeId], references: [id], onDelete: Cascade)
+  entries      LedgerEntry[]
+  reservations Reservation[]
+
+  @@index([spaceId, typeId])
+  @@index([spaceId, domainId])
+}
+
+/// 流转记录：数量变化的唯一途径；append-only，不可修改删除
+model LedgerEntry {
+  id         String @id
+  spaceId    String
+  resourceId String
+  /// creation（创建/注入）/ reservation（占用冻结）/ release（释放占用）/ settle（占用结算为花费）/ consumption（花费）
+  kind       String
+
+  /// 本次变化量的绝对值，恒为正
+  amount Float
+
+  /// 对总量的影响（仅创建为正）
+  totalDelta Float @default(0)
+  /// 对已占用的影响（占用为正，释放/结算为负）
+  reservedDelta Float @default(0)
+  /// 对已消耗的影响（花费/结算为正）
+  consumedDelta Float @default(0)
+
+  /// 来源类别：manual / timed / event / builtin
+  sourceKind String?
+  /// 去向类别：manual / wear / event
+  sinkKind   String?
+  /// 触发方式：manual / timed / event / system
+  triggerKind String
+  /// 发起者（成员标识；MVP 阶段由请求头登记，不做鉴权）
+  actorId String?
+  /// 关联的业务事件或说明
+  reason String?
+  /// 关联的占用
+  reservationId String?
+  /// 幂等键，同一空间内唯一
+  idempotencyKey String?
+
+  occurredAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  space    Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@unique([spaceId, idempotencyKey])
+  @@index([spaceId, resourceId, occurredAt])
+}
+
+/// 占用：对可用量的冻结，有生命周期（活跃 → 释放 / 结算）
+model Reservation {
+  id         String  @id
+  spaceId    String
+  resourceId String
+  amount     Float
+  /// active / released / settled
+  status     String  @default("active")
+  /// 占用发起者
+  holderId   String?
+  purpose    String?
+  /// 持有期截止时间
+  holdUntil  DateTime?
+  /// 已释放量（占用可部分释放）
+  releasedAmount Float @default(0)
+  /// 已结算量（占用可部分结算）
+  settledAmount  Float @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  space    Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@index([spaceId, resourceId, status])
+}

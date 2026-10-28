@@ -1,0 +1,14 @@
+{
+  "name": "corn",
+  "version": "0.0.0",
+  "private": true,
+  "description": "资源管理云服务",
+  "scripts": {
+    "dev:api": "pnpm --filter @corn/api dev",
+    "dev:web": "pnpm --filter @corn/web dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "db:push": "pnpm --filter @corn/api prisma:push",
+    "db:seed": "pnpm --filter @corn/api seed"
+  }
+}
