@@ -265,4 +265,106 @@ describe('资源维护端到端流程', () => {
       .send({ status: 'active' })
       .expect(200);
   });
+
+  it('群组维护：创建、重名冲突、改名、删除后资源归属置空', async () => {
+    const create = await request(app.getHttpServer())
+      .post(`/spaces/${spaceId}/groups`)
+      .send({ code: 'frontend-team', name: '前端组' })
+      .expect(201);
+    const groupId = create.body.data.id;
+    expect(groupId).toBeTruthy();
+
+    // 同空间编码唯一
+    const dup = await request(app.getHttpServer())
+      .post(`/spaces/${spaceId}/groups`)
+      .send({ code: 'frontend-team', name: '重复群组' })
+      .expect(409);
+    expect(dup.body.error.code).toBe('CONFLICT');
+
+    // 改名
+    await request(app.getHttpServer())
+      .patch(`/spaces/${spaceId}/groups/${groupId}`)
+      .send({ name: '前端研发组' })
+      .expect(200);
+    const renamed = (await request(app.getHttpServer()).get(`/spaces/${spaceId}/groups/${groupId}`)).body.data;
+    expect(renamed.name).toBe('前端研发组');
+
+    // 资源挂到群组后删除群组，groupId 置空且资源保留
+    const resource = (await request(app.getHttpServer()).get(`/spaces/${spaceId}/fund`)).body.list[0];
+    await prisma.resource.update({ where: { id: resource.id }, data: { groupId } });
+    await request(app.getHttpServer())
+      .delete(`/spaces/${spaceId}/groups/${groupId}`)
+      .expect(200);
+    const kept = await prisma.resource.findUnique({ where: { id: resource.id } });
+    expect(kept).not.toBeNull();
+    expect(kept?.groupId).toBeNull();
+
+    // 删除后查询 404
+    await request(app.getHttpServer()).get(`/spaces/${spaceId}/groups/${groupId}`).expect(404);
+  });
+
+  it('群组嵌套：三级结构、防环校验、删除父组后子组提升', async () => {
+    const mk = async (code: string, name: string, parentId?: string) =>
+      (await request(app.getHttpServer())
+        .post(`/spaces/${spaceId}/groups`)
+        .send({ code, name, ...(parentId ? { parentId } : {}) })
+        .expect(201)).body.data.id;
+    const parent = await mk('hq-team', '总部');
+    const child = await mk('dev-team', '研发部', parent);
+    const grand = await mk('fe-team', '前端组', child);
+
+    // 三级结构落库
+    const childView = (await request(app.getHttpServer()).get(`/spaces/${spaceId}/groups/${child}`)).body.data;
+    expect(childView.parentId).toBe(parent);
+
+    // 防环：不能把后代设为上级
+    const cycle = await request(app.getHttpServer())
+      .patch(`/spaces/${spaceId}/groups/${parent}`)
+      .send({ parentId: grand })
+      .expect(400);
+    expect(cycle.body.error.code).toBe('VALIDATION_FAILED');
+
+    // 防环：不能把自身设为上级
+    await request(app.getHttpServer())
+      .patch(`/spaces/${spaceId}/groups/${child}`)
+      .send({ parentId: child })
+      .expect(400);
+
+    // 上级不存在
+    await request(app.getHttpServer())
+      .patch(`/spaces/${spaceId}/groups/${child}`)
+      .send({ parentId: 'gp_missing' })
+      .expect(404);
+
+    // 删除父组：子组提升为顶级且保留，孙组挂到子组不变
+    await request(app.getHttpServer()).delete(`/spaces/${spaceId}/groups/${parent}`).expect(200);
+    const promoted = (await request(app.getHttpServer()).get(`/spaces/${spaceId}/groups/${child}`)).body.data;
+    expect(promoted.parentId).toBeNull();
+    const keptGrand = (await request(app.getHttpServer()).get(`/spaces/${spaceId}/groups/${grand}`)).body.data;
+    expect(keptGrand.parentId).toBe(child);
+
+    // 清理嵌套测试数据
+    await request(app.getHttpServer()).delete(`/spaces/${spaceId}/groups/${grand}`).expect(200);
+    await request(app.getHttpServer()).delete(`/spaces/${spaceId}/groups/${child}`).expect(200);
+  });
+
+  it('领域维护：改名与删除', async () => {
+    const create = await request(app.getHttpServer())
+      .post(`/spaces/${spaceId}/domains`)
+      .send({ code: 'hr-domain', name: '人力领域' })
+      .expect(201);
+    const domain2 = create.body.data.id;
+
+    await request(app.getHttpServer())
+      .patch(`/spaces/${spaceId}/domains/${domain2}`)
+      .send({ name: '人力资源领域' })
+      .expect(200);
+    const renamed = (await request(app.getHttpServer()).get(`/spaces/${spaceId}/domains/${domain2}`)).body.data;
+    expect(renamed.name).toBe('人力资源领域');
+
+    await request(app.getHttpServer())
+      .delete(`/spaces/${spaceId}/domains/${domain2}`)
+      .expect(200);
+    await request(app.getHttpServer()).get(`/spaces/${spaceId}/domains/${domain2}`).expect(404);
+  });
 });

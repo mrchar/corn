@@ -96,6 +96,5 @@ function selectMenu(key: string) {
         {{ item.label }}
       </button>
     </nav>
-    <div v-if="$slots['primary-action']" class="app-fab"><slot name="primary-action" /></div>
   </template>
 </template>

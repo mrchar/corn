@@ -16,8 +16,11 @@ import {
 import { spaceId as appSpaceId } from '../store/app';
 import AppLayout from '../layouts/AppLayout.vue';
 
-const { Table, Dialog, Button, Space, Select, Input, InputNumber, Switch, Tag, Typography, Empty } = components;
-const { message } = composables;
+const { Table, Dialog, Button, Space, Select, Input, InputNumber, Switch, Tag, Typography, Empty, FloatButton, Icon } = components;
+const { message, useMediaQuery } = composables;
+
+/** 视窗分支：桌面页头文字按钮 / 手机悬浮圆钮，动作同源（与 AppLayout 同断点直查，响应式自动同步） */
+const isMobile = useMediaQuery('(max-width: 767px)');
 
 /* ---------- 列表 ---------- */
 
@@ -315,9 +318,16 @@ const deriveAction = async () => {
   <AppLayout>
     <template #title>资源类型</template>
     <template #primary-action>
-      <Space>
-        <Button @click="openDerive">从模板派生</Button>
-        <Button type="primary" @click="openCreate">+ 新建类型</Button>
+      <Space v-if="!isMobile">
+        <Button @click="openDerive">
+          <Icon>
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </Icon> 从模板派生
+        </Button>
+        <Button type="primary" @click="openCreate">
+          <Icon><path d="M12 5v14M5 12h14" /></Icon> 新建类型
+        </Button>
       </Space>
     </template>
 
@@ -471,5 +481,15 @@ const deriveAction = async () => {
         </label>
       </div>
     </Dialog>
+
+  <!-- 手机端主操作：fixed 定位不受挂载位置影响，动作与桌面页头按钮同源 -->
+  <FloatButton
+    v-if="isMobile"
+    :actions="[
+      { key: 'derive', label: '从模板派生' },
+      { key: 'create', label: '新建类型' },
+    ]"
+    @select="(key: string) => (key === 'create' ? openCreate() : openDerive())"
+  />
   </AppLayout>
 </template>

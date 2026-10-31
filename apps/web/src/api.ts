@@ -70,8 +70,68 @@ export function listSpaces() {
   return request<ApiList<Space>>('GET', '/spaces');
 }
 
+export interface SpacePayload {
+  code: string;
+  name: string;
+}
+
+export function createSpace(payload: SpacePayload) {
+  return request<ApiSuccess<{ id: string }>>('POST', '/spaces', payload);
+}
+
+export function updateSpace(spaceId: string, name: string) {
+  return request<ApiSuccess>('PATCH', `/spaces/${spaceId}`, { name });
+}
+
 export function listDomains(spaceId: string) {
   return request<ApiList<Domain>>('GET', `/spaces/${spaceId}/domains`);
+}
+
+export interface DomainPayload {
+  code: string;
+  name: string;
+}
+
+export function createDomain(spaceId: string, payload: DomainPayload) {
+  return request<ApiSuccess<{ id: string }>>('POST', `/spaces/${spaceId}/domains`, payload);
+}
+
+export function updateDomain(spaceId: string, domainId: string, name: string) {
+  return request<ApiSuccess>('PATCH', `/spaces/${spaceId}/domains/${domainId}`, { name });
+}
+
+export function deleteDomain(spaceId: string, domainId: string) {
+  return request<ApiSuccess>('DELETE', `/spaces/${spaceId}/domains/${domainId}`);
+}
+
+export interface Group {
+  id: string;
+  parentId: string | null;
+  code: string;
+  name: string;
+}
+
+export function listGroups(spaceId: string) {
+  return request<ApiList<Group>>('GET', `/spaces/${spaceId}/groups`);
+}
+
+export interface GroupPayload {
+  code: string;
+  name: string;
+  /** 上级群组 id，缺省为顶级 */
+  parentId?: string;
+}
+
+export function createGroup(spaceId: string, payload: GroupPayload) {
+  return request<ApiSuccess<{ id: string }>>('POST', `/spaces/${spaceId}/groups`, payload);
+}
+
+export function updateGroup(spaceId: string, groupId: string, payload: { name?: string; parentId?: string | null }) {
+  return request<ApiSuccess>('PATCH', `/spaces/${spaceId}/groups/${groupId}`, payload);
+}
+
+export function deleteGroup(spaceId: string, groupId: string) {
+  return request<ApiSuccess>('DELETE', `/spaces/${spaceId}/groups/${groupId}`);
 }
 
 /* ---------- 流转动作 ---------- */

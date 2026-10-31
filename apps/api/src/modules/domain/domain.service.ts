@@ -4,7 +4,7 @@ import { newId } from '../../common/ids';
 import { ListQuery, resolvePaging, resolveSort } from '../../common/pagination';
 import { listResult, ListResult } from '../../common/response';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateDomainDto } from './domain.dto';
+import { CreateDomainDto, UpdateDomainDto } from './domain.dto';
 
 export interface DomainView {
   id: string;
@@ -50,6 +50,21 @@ export class DomainService {
       data: { id: newId('dm'), spaceId, code: dto.code, name: dto.name },
     });
     return this.toView(entity);
+  }
+
+  async update(spaceId: string, domainId: string, dto: UpdateDomainDto): Promise<DomainView> {
+    await this.require(spaceId, domainId);
+    const entity = await this.prisma.domain.update({
+      where: { id: domainId },
+      data: { name: dto.name },
+    });
+    return this.toView(entity);
+  }
+
+  /** 删除领域：资源类型与资源随外键级联清除 */
+  async remove(spaceId: string, domainId: string): Promise<void> {
+    await this.require(spaceId, domainId);
+    await this.prisma.domain.delete({ where: { id: domainId } });
   }
 
   private toView(entity: {

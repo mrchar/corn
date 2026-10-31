@@ -1,7 +1,7 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ListQuery } from '../../common/pagination';
 import { success } from '../../common/response';
-import { CreateDomainDto } from './domain.dto';
+import { CreateDomainDto, UpdateDomainDto } from './domain.dto';
 import { DomainService } from './domain.service';
 
 @Controller('spaces/:spaceId/domains')
@@ -21,5 +21,20 @@ export class DomainController {
   @Get(':domainId')
   async detail(@Param('spaceId') spaceId: string, @Param('domainId') domainId: string) {
     return success('查询成功', await this.domains.detail(spaceId, domainId));
+  }
+
+  @Patch(':domainId')
+  async update(
+    @Param('spaceId') spaceId: string,
+    @Param('domainId') domainId: string,
+    @Body() dto: UpdateDomainDto,
+  ) {
+    return success('领域已更新', await this.domains.update(spaceId, domainId, dto));
+  }
+
+  @Delete(':domainId')
+  async remove(@Param('spaceId') spaceId: string, @Param('domainId') domainId: string) {
+    await this.domains.remove(spaceId, domainId);
+    return success('领域已删除');
   }
 }

@@ -16,8 +16,11 @@ import {
 import { domains, domainId, domainOptions, spaceId } from '../store/app';
 import AppLayout from '../layouts/AppLayout.vue';
 
-const { Table, Form, Dialog, Drawer, Button, Space, Typography, Descriptions, Tabs, Empty, Dropdown, Select } = components;
-const { useResources, message } = composables;
+const { Table, Form, Dialog, Drawer, Button, Space, Typography, Descriptions, Tabs, Empty, Dropdown, Select, FloatButton, Icon } = components;
+const { useResources, message, useMediaQuery } = composables;
+
+/** 视窗分支：桌面页头文字按钮 / 手机悬浮圆钮，动作同源（与 AppLayout 同断点直查，响应式自动同步） */
+const isMobile = useMediaQuery('(max-width: 767px)');
 
 const pool = useResources({
   server: `/spaces/${spaceId.value}`,
@@ -318,7 +321,9 @@ const ledgerColumns = [
       />
     </template>
     <template #primary-action>
-      <Button type="primary" @click="openCreate">+ 新建</Button>
+      <Button v-if="!isMobile" type="primary" @click="openCreate">
+        <Icon><path d="M12 5v14M5 12h14" /></Icon> 新建
+      </Button>
     </template>
 
     <div v-if="pool.state.status === 'pending'" style="text-align: center; padding: 48px">
@@ -433,5 +438,8 @@ const ledgerColumns = [
       ]"
     />
   </Dialog>
+
+  <!-- 手机端主操作：fixed 定位不受挂载位置影响，动作与桌面页头按钮同源 -->
+  <FloatButton v-if="isMobile" :actions="[{ key: 'create', label: '新建资源' }]" @select="(key: string) => key === 'create' && openCreate()" />
   </AppLayout>
 </template>

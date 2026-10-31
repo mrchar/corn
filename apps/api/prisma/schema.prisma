@@ -20,6 +20,7 @@ model Space {
   updatedAt DateTime @updatedAt
 
   domains     Domain[]
+  groups      Group[]
   types       ResourceType[]
   resources   Resource[]
   entries     LedgerEntry[]
@@ -42,6 +43,26 @@ model Domain {
 
   @@unique([spaceId, code])
   @@index([spaceId])
+}
+
+/// 群组：空间级的成员编组，支持嵌套，可作为资源归属与权限投影源
+model Group {
+  id        String   @id
+  spaceId   String
+  parentId  String?
+  name      String
+  code      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  space     Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  parent    Group?    @relation("GroupTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Group[]   @relation("GroupTree")
+  resources Resource[]
+
+  @@unique([spaceId, code])
+  @@index([spaceId])
+  @@index([parentId])
 }
 
 /// 内建资源模板：系统预置的只读资源定义，覆盖全部组织对象
@@ -146,12 +167,14 @@ model Resource {
 
   space        Space         @relation(fields: [spaceId], references: [id], onDelete: Cascade)
   domain       Domain        @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  group        Group?        @relation(fields: [groupId], references: [id], onDelete: SetNull)
   type         ResourceType  @relation(fields: [typeId], references: [id], onDelete: Cascade)
   entries      LedgerEntry[]
   reservations Reservation[]
 
   @@index([spaceId, typeId])
   @@index([spaceId, domainId])
+  @@index([groupId])
 }
 
 /// 流转记录：数量变化的唯一途径；append-only，不可修改删除

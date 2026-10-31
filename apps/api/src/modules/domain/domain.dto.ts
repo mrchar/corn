@@ -10,3 +10,10 @@ export class CreateDomainDto {
   @Length(1, 60)
   name: string;
 }
+
+/** 编码创建后不可变，仅允许改名 */
+export class UpdateDomainDto {
+  @IsString()
+  @Length(1, 60)
+  name: string;
+}

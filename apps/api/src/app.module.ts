@@ -5,6 +5,7 @@ import { SpaceGuard } from './common/space.guard';
 import { PrismaModule } from './prisma/prisma.module';
 import { SpaceModule } from './modules/space/space.module';
 import { DomainModule } from './modules/domain/domain.module';
+import { GroupModule } from './modules/group/group.module';
 import { ResourceTypeModule } from './modules/resource-type/resource-type.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
 import { MetadataModule } from './modules/metadata/metadata.module';
@@ -17,6 +18,7 @@ import { ResourceModule } from './modules/resource/resource.module';
     PrismaModule,
     SpaceModule,
     DomainModule,
+    GroupModule,
     ResourceTypeModule,
     // MetadataModule 必须在 ResourceModule 之前注册，否则 /openapi.json 会被动态 :typeCode 路由吞掉。
     MetadataModule,
