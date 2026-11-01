@@ -8,6 +8,7 @@ import {
   spaceId,
   spaceOptions,
 } from '../store/app';
+import CommandBar from '../components/CommandBar.vue';
 
 const { Layout, Drawer, Select, Button, Typography } = components;
 const { useMediaQuery } = composables;
@@ -46,17 +47,21 @@ function selectMenu(key: string) {
         </nav>
       </div>
     </template>
-    <div class="page-shell">
-      <header class="page-toolbar">
-        <div class="page-toolbar__title"><slot name="title" /></div>
-        <div v-if="$slots.filters" class="page-toolbar__filters"><slot name="filters" /></div>
-        <div v-if="$slots['primary-action']" class="page-toolbar__actions"><slot name="primary-action" /></div>
-      </header>
-      <div class="page-body"><slot /></div>
+    <div class="app-desktop-main">
+      <div class="page-shell">
+        <header class="page-toolbar">
+          <div class="page-toolbar__title"><slot name="title" /></div>
+          <div v-if="$slots.filters" class="page-toolbar__filters"><slot name="filters" /></div>
+          <div v-if="$slots['primary-action']" class="page-toolbar__actions"><slot name="primary-action" /></div>
+        </header>
+        <div class="page-body"><slot /></div>
+      </div>
+      <!-- 指令条：流内 sticky 悬浮于内容区底部，长页面滚动中保持在场 -->
+      <CommandBar />
     </div>
   </Layout>
 
-  <!-- 手机：顶条 + 左侧抽屉 + 底部导航 + 主按钮靠下 -->
+  <!-- 手机：顶条 + 左侧抽屉 + 底部指令条（取代导航栏，视图切换走指令） -->
   <template v-else>
     <header class="app-mobile-header">
       <Button class="app-mobile-header__burger" @click="drawerOpen = true">☰</Button>
@@ -84,17 +89,6 @@ function selectMenu(key: string) {
       </div>
     </Drawer>
     <div class="app-mobile-body"><slot /></div>
-    <nav class="app-tabbar">
-      <button
-        v-for="item in menuItems"
-        :key="item.key"
-        type="button"
-        class="app-tabbar__item"
-        :class="{ 'app-tabbar__item--active': item.key === currentView }"
-        @click="selectMenu(item.key)"
-      >
-        {{ item.label }}
-      </button>
-    </nav>
+    <CommandBar />
   </template>
 </template>

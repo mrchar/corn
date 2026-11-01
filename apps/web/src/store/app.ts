@@ -15,6 +15,9 @@ export const spaceId = ref('');
 export const domains = ref<Domain[]>([]);
 export const domainId = ref('');
 
+/** 全局数据版本号：任意写操作成功后递增，驱动各视图重新拉取列表（智能体写库后页面即时反映） */
+export const dataVersion = ref(0);
+
 export const spaceOptions = computed(() =>
   spaces.value.map((s) => ({ label: s.name, value: s.id })),
 );

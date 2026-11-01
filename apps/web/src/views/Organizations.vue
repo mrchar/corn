@@ -12,7 +12,7 @@ import {
   updateGroup,
   updateSpace,
 } from '../api';
-import { domains, reloadDomains, reloadSpaces, spaceId, spaces } from '../store/app';
+import { dataVersion, domains, reloadDomains, reloadSpaces, spaceId, spaces } from '../store/app';
 import AppLayout from '../layouts/AppLayout.vue';
 
 const { Table, Dialog, Button, Space, Input, Select, Typography, Empty, FloatButton, Icon, List, ListItem } = components;
@@ -81,6 +81,7 @@ async function reloadGroups() {
 }
 
 watch(spaceId, () => reloadGroups(), { immediate: true });
+watch(dataVersion, () => reloadGroups()); // 智能体等渠道写库后自动重拉群组
 
 const metaColumns = [
   { key: 'code', title: '编码' },

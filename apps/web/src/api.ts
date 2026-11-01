@@ -1,6 +1,7 @@
 /** 统一请求封装：自动注入空间前缀与 actor 头，统一解析响应信封。 */
 
-const ACTOR_ID = 'web-client';
+/** 本地身份标识：随所有请求注入 x-actor-id（资源客户端与智能体网关共用） */
+export const ACTOR_ID = 'web-client';
 
 export interface ApiList<T> {
   list: T[];

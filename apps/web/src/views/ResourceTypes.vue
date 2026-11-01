@@ -13,7 +13,7 @@ import {
   type Domain,
   type ResourceType,
 } from '../api';
-import { spaceId as appSpaceId } from '../store/app';
+import { dataVersion, spaceId as appSpaceId } from '../store/app';
 import AppLayout from '../layouts/AppLayout.vue';
 
 const { Table, Dialog, Button, Space, Select, Input, InputNumber, Switch, Tag, Typography, Empty, FloatButton, Icon } = components;
@@ -32,10 +32,11 @@ function refresh() {
   refreshTick.value++;
 }
 
-/** fetch 属性身份随 refreshTick/spaceId 变化，驱动 Table 重新拉取 */
+/** fetch 属性身份随 refreshTick/dataVersion/spaceId 变化，驱动 Table 重新拉取 */
 const fetchFn = computed(() => {
   const sid = appSpaceId.value;
   void refreshTick.value;
+  void dataVersion.value; // 智能体等渠道写库后自动重拉
   return (async (query: any) => {
     if (!sid) return { list: [] as any[], total: 0 };
     const res = await listResourceTypes(sid, {

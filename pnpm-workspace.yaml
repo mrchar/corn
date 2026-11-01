@@ -11,4 +11,8 @@ allowBuilds:
   unrs-resolver: true
 
 minimumReleaseAgeExclude:
-  - '@mrchar/cumquat@0.1.0'
+  - '@mrchar/cumquat@0.1.0 || 0.3.1'
+  - '@ai-sdk/gateway@4.0.132'
+  - '@ai-sdk/vue@4.0.159'
+  - ai@7.0.159
+  - ws@8.22.1

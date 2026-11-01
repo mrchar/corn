@@ -13,7 +13,7 @@ import {
   type LedgerEntry,
   type Reservation,
 } from '../api';
-import { domains, domainId, domainOptions, spaceId } from '../store/app';
+import { dataVersion, domains, domainId, domainOptions, spaceId } from '../store/app';
 import AppLayout from '../layouts/AppLayout.vue';
 
 const { Table, Form, Dialog, Drawer, Button, Space, Typography, Descriptions, Tabs, Empty, Dropdown, Select, FloatButton, Icon } = components;
@@ -55,10 +55,11 @@ const columns = computed(() => {
   ];
 });
 
-/** fetch 属性身份随 activeType/domainId 变化，驱动 Table 重新拉取 */
+/** fetch 属性身份随 activeType/domainId/dataVersion 变化，驱动 Table 重新拉取 */
 const fetchFn = computed(() => {
   const current = client.value;
   const domainFilter = domainId.value;
+  void dataVersion.value; // 智能体等渠道写库后自动重拉
   return (async (query: any) => {
     if (!current) return { list: [] as any[], total: 0 };
     const filters = { ...(query.filters ?? {}) };
