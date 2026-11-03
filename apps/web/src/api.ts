@@ -1,7 +1,6 @@
-/** 统一请求封装：自动注入空间前缀与 actor 头，统一解析响应信封。 */
+/** 统一请求封装：自动注入登录凭据与空间前缀，401 静默续期重放，统一解析响应信封。 */
 
-/** 本地身份标识：随所有请求注入 x-actor-id（资源客户端与智能体网关共用） */
-export const ACTOR_ID = 'web-client';
+import { accessToken, clearAuth, refreshToken as storedRefreshToken, setTokens } from './store/auth';
 
 export interface ApiList<T> {
   list: T[];
@@ -20,11 +19,47 @@ export interface ApiError {
   error: { code: string; detail?: unknown };
 }
 
+/** 认证端点自带凭据语义，不注入 Authorization */
+function isAuthFreeUrl(url: string): boolean {
+  return url.startsWith('/auth/');
+}
+
+/** 单飞续期：并发 401 只触发一次 /auth/refresh，成功返回 true */
+let refreshing: Promise<boolean> | null = null;
+
+async function doRefresh(): Promise<boolean> {
+  if (!storedRefreshToken.value) return false;
+  try {
+    const res = await fetch('/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: storedRefreshToken.value }),
+    });
+    if (!res.ok) return false;
+    const body = (await res.json()) as ApiSuccess<{ accessToken: string; refreshToken: string }>;
+    if (!body.data) return false;
+    setTokens(body.data);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function refreshOnce(): Promise<boolean> {
+  if (!refreshing) {
+    refreshing = doRefresh().finally(() => {
+      refreshing = null;
+    });
+  }
+  return refreshing;
+}
+
 async function request<T>(
   method: string,
   url: string,
   body?: unknown,
   query?: Record<string, unknown>,
+  retried = false,
 ): Promise<T> {
   const search = new URLSearchParams();
   if (query) {
@@ -34,14 +69,22 @@ async function request<T>(
     }
   }
   const fullUrl = search.toString() ? `${url}?${search.toString()}` : url;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (accessToken.value && !isAuthFreeUrl(url)) {
+    headers.Authorization = `Bearer ${accessToken.value}`;
+  }
   const res = await fetch(fullUrl, {
     method,
-    headers: {
-      'Content-Type': 'application/json',
-      'x-actor-id': ACTOR_ID,
-    },
+    headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+  // 登录过期：单飞续期后重放一次原请求；续期失败则清除登录态交由门禁处理
+  if (res.status === 401 && !retried && !isAuthFreeUrl(url)) {
+    if (await refreshOnce()) {
+      return request<T>(method, url, body, query, true);
+    }
+    clearAuth();
+  }
   const text = await res.text();
   const data = text ? JSON.parse(text) : undefined;
   if (!res.ok) {
@@ -49,6 +92,33 @@ async function request<T>(
     throw new Error(err.message);
   }
   return data as T;
+}
+
+/* ---------- 认证 ---------- */
+
+export interface AuthTokensPayload {
+  accessToken: string;
+  refreshToken: string;
+  user: { id: string; username: string };
+}
+
+export async function registerApi(username: string, password: string): Promise<AuthTokensPayload> {
+  const res = await request<ApiSuccess<AuthTokensPayload>>('POST', '/auth/register', { username, password });
+  return res.data as AuthTokensPayload;
+}
+
+export async function loginApi(username: string, password: string): Promise<AuthTokensPayload> {
+  const res = await request<ApiSuccess<AuthTokensPayload>>('POST', '/auth/login', { username, password });
+  return res.data as AuthTokensPayload;
+}
+
+/** 登出：吊销服务端 refresh token（幂等，失败静默） */
+export async function logoutApi(): Promise<void> {
+  try {
+    await request('POST', '/auth/logout', { refreshToken: storedRefreshToken.value });
+  } catch {
+    /* 登出尽力而为 */
+  }
 }
 
 /* ---------- 空间与领域 ---------- */

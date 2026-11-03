@@ -8,6 +8,8 @@ import {
   spaceId,
   spaceOptions,
 } from '../store/app';
+import { currentUser, clearAuth } from '../store/auth';
+import { logoutApi } from '../api';
 import CommandBar from '../components/CommandBar.vue';
 
 const { Layout, Drawer, Select, Button, Typography } = components;
@@ -23,6 +25,13 @@ watch(currentView, () => {
 
 function selectMenu(key: string) {
   currentView.value = key as 'pool' | 'types';
+}
+
+/** 登出：吊销服务端凭据 → 清除本地登录态 → 整页刷新复位全部状态（门禁自动接管） */
+async function handleLogout() {
+  await logoutApi();
+  clearAuth();
+  window.location.reload();
 }
 </script>
 
@@ -45,6 +54,12 @@ function selectMenu(key: string) {
             {{ item.label }}
           </button>
         </nav>
+        <div class="app-sider-footer">
+          <Typography :level="0" style="color: #374151; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
+            {{ currentUser?.username }}
+          </Typography>
+          <Button size="sm" @click="handleLogout">退出登录</Button>
+        </div>
       </div>
     </template>
     <div class="app-desktop-main">
@@ -85,6 +100,10 @@ function selectMenu(key: string) {
         <div v-if="$slots.filters" class="app-drawer-filters">
           <Typography :level="0" style="font-weight: 600">筛选</Typography>
           <slot name="filters" />
+        </div>
+        <div class="app-sider-footer">
+          <Typography :level="0" style="color: #374151">{{ currentUser?.username }}</Typography>
+          <Button size="sm" @click="handleLogout">退出登录</Button>
         </div>
       </div>
     </Drawer>

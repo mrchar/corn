@@ -5,7 +5,6 @@ import { useResources } from '@mrchar/cumquat/composables';
 import { z } from 'zod';
 import { computed, ref } from 'vue';
 import {
-  ACTOR_ID,
   createConsumption,
   createCreation,
   createDomain,
@@ -30,6 +29,7 @@ import {
   type ResourceType,
 } from '../api';
 import { currentView, dataVersion, domainId, domains, spaceId, spaces } from '../store/app';
+import { accessToken } from '../store/auth';
 
 /**
  * 前端智能体（单文件三层）：契约层（工具 schema / 系统提示 / 工具集）、
@@ -96,9 +96,10 @@ interface ExecuteInput {
   description?: string;
 }
 
-/** 资源池单例：跨工具调用复用已加载的元数据，空间切换时重建 */
+/** 资源池单例：跨工具调用复用已加载的元数据，空间或登录凭据变化时重建 */
 let cachedPool: ReturnType<typeof useResources> | null = null;
 let cachedSpace = '';
+let cachedToken = '';
 
 /**
  * 获取就绪的资源池：元数据（openapi）异步加载，names/has 是同步读取——
@@ -106,13 +107,14 @@ let cachedSpace = '';
  * client() 的方法内部自等待，不受此影响。
  */
 async function currentPool() {
-  if (!cachedPool || cachedSpace !== spaceId.value) {
+  if (!cachedPool || cachedSpace !== spaceId.value || cachedToken !== accessToken.value) {
     cachedPool = useResources({
       server: `/spaces/${spaceId.value}`,
       doc: '/openapi.json',
-      headers: { 'x-actor-id': ACTOR_ID },
+      headers: { Authorization: `Bearer ${accessToken.value}` },
     });
     cachedSpace = spaceId.value;
+    cachedToken = accessToken.value;
   }
   for (let i = 0; i < 100 && cachedPool.state.status === 'pending'; i++) {
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -663,8 +665,18 @@ export function buildSystemPrompt(ctx: AgentPromptContext): string {
 
 /* ==================== 会话层 ==================== */
 
-/** OpenAI 兼容代理端点（大模型配置与凭据由代理在后端注入，前端不持有、不透传）；provider 内部用 new URL() 拼地址，须绝对路径 */
-const provider = createOpenAICompatible({ name: 'corn-agent', baseURL: `${window.location.origin}/agent/v1` });
+/**
+ * OpenAI 兼容代理端点工厂（大模型配置与凭据由代理在后端注入，前端不持有、不透传）；
+ * provider 内部用 new URL() 拼地址，须绝对路径。每次会话取当前登录凭据构造，
+ * token 静默续期后新会话自动携带新凭据。
+ */
+function createProvider() {
+  return createOpenAICompatible({
+    name: 'corn-agent',
+    baseURL: `${window.location.origin}/agent/v1`,
+    headers: { Authorization: `Bearer ${accessToken.value}` },
+  });
+}
 
 /** 框架多步上限：防御模型循环调用 */
 const MAX_STEPS = 10;
@@ -817,7 +829,7 @@ export function useAgentChat() {
     try {
       const result = streamText({
         // model 字段由代理在后端覆写（env.ARK_MODEL），前端仅传占位
-        model: provider.chatModel('agent'),
+        model: createProvider().chatModel('agent'),
         system: buildSystemPrompt({
           spaceName: spaces.value.find((s) => s.id === spaceId.value)?.name ?? '',
           view: currentView.value,

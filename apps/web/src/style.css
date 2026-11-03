@@ -23,6 +23,17 @@ body {
   overflow-y: auto;
 }
 
+/* 侧栏/抽屉底部：当前用户与登出 */
+.app-sider-footer {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+
 /* 菜单（桌面侧栏与手机抽屉共用） */
 .app-menu {
   display: flex;

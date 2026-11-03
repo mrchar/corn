@@ -18,12 +18,15 @@ export interface SpaceView {
 export class SpaceService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(query: ListQuery): Promise<ListResult<SpaceView>> {
+  async list(query: ListQuery, ownerId: string): Promise<ListResult<SpaceView>> {
     const paging = resolvePaging(query);
     const keyword = String(query.keyword ?? '').trim();
-    const where = keyword
-      ? { OR: [{ code: { contains: keyword } }, { name: { contains: keyword } }] }
-      : {};
+    const where = {
+      ownerId,
+      ...(keyword
+        ? { OR: [{ code: { contains: keyword } }, { name: { contains: keyword } }] }
+        : {}),
+    };
     const orderBy = resolveSort(query.sorter, ['createdAt', 'name', 'code'] as const, { createdAt: 'asc' });
 
     const [rows, total] = await Promise.all([
@@ -39,9 +42,9 @@ export class SpaceService {
     return this.toView(space);
   }
 
-  async create(dto: CreateSpaceDto): Promise<SpaceView> {
+  async create(dto: CreateSpaceDto, ownerId: string): Promise<SpaceView> {
     const entity = await this.prisma.space.create({
-      data: { id: newId('sp'), code: dto.code, name: dto.name },
+      data: { id: newId('sp'), ownerId, code: dto.code, name: dto.name },
     });
     return this.toView(entity);
   }

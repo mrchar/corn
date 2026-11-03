@@ -1,10 +1,13 @@
 import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
+import { JwtService } from '@nestjs/jwt';
 import WebSocket, { WebSocketServer, type RawData } from 'ws';
 import { DoubaoAsrService, type DoubaoAsrSession } from './doubao-asr.service';
 
 /**
  * 前端音频网关：挂在 HTTP server 的 /ws/asr 路径上。
+ * 握手凭 query 参数 ?token=<accessToken> 传递登录凭据（浏览器 WebSocket 无法自定义请求头），
+ * 校验失败立即以 4401 关闭连接。
  * 客户端 → 服务端：文本帧为控制信令（start/stop），二进制帧为 16kHz 16bit 单声道 PCM 分片。
  * 服务端 → 客户端：JSON 文本帧（ready/partial/final/error）。
  */
@@ -16,6 +19,7 @@ export class AsrGateway implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly adapterHost: HttpAdapterHost,
     private readonly doubao: DoubaoAsrService,
+    private readonly jwt: JwtService,
   ) {}
 
   onModuleInit(): void {
@@ -25,7 +29,7 @@ export class AsrGateway implements OnModuleInit, OnModuleDestroy {
       return;
     }
     this.wss = new WebSocketServer({ server: httpServer, path: '/ws/asr' });
-    this.wss.on('connection', (ws) => this.handleConnection(ws));
+    this.wss.on('connection', (ws, req) => this.handleConnection(ws, req));
     this.logger.log('ASR WebSocket 网关已挂载（/ws/asr）');
   }
 
@@ -34,7 +38,17 @@ export class AsrGateway implements OnModuleInit, OnModuleDestroy {
     this.wss = null;
   }
 
-  private handleConnection(ws: WebSocket): void {
+  private async handleConnection(ws: WebSocket, req: import('node:http').IncomingMessage): Promise<void> {
+    // 握手鉴权：token 缺失或无效立即关闭（4401 自定义码，前端可识别）
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const token = url.searchParams.get('token') ?? '';
+    try {
+      await this.jwt.verifyAsync(token);
+    } catch {
+      ws.close(4401, 'unauthorized');
+      return;
+    }
+
     let session: DoubaoAsrSession | null = null;
     const send = (payload: Record<string, unknown>): void => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));

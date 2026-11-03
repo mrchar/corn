@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { AppErrorFilter } from './common/app-error.filter';
+import { AuthGuard } from './common/auth.guard';
 import { SpaceGuard } from './common/space.guard';
 import { PrismaModule } from './prisma/prisma.module';
+import { AuthModule } from './modules/auth/auth.module';
 import { SpaceModule } from './modules/space/space.module';
 import { DomainModule } from './modules/domain/domain.module';
 import { GroupModule } from './modules/group/group.module';
@@ -18,6 +20,7 @@ import { LlmModule } from './modules/llm/llm.module';
 @Module({
   imports: [
     PrismaModule,
+    AuthModule,
     SpaceModule,
     DomainModule,
     GroupModule,
@@ -35,6 +38,8 @@ import { LlmModule } from './modules/llm/llm.module';
   ],
   providers: [
     { provide: APP_FILTER, useClass: AppErrorFilter },
+    // Guard 按注册顺序执行：先验登录身份，再做空间归属校验
+    { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: SpaceGuard },
   ],
 })

@@ -1,5 +1,6 @@
 import { ref, type Ref } from 'vue';
 import type { VoiceRecognizer } from '@mrchar/cumquat/composables';
+import { accessToken } from '../store/auth';
 
 /**
  * 语音识别器工厂：
@@ -146,7 +147,8 @@ export function createRemoteRecognizer({ transcript, level, onError }: Recognize
       transcript.value = '';
       let socket: WebSocket;
       try {
-        socket = new WebSocket(ASR_WS_URL);
+        // 浏览器 WebSocket 无法自定义请求头，登录凭据经 query 参数随握手传递
+        socket = new WebSocket(`${ASR_WS_URL}?token=${encodeURIComponent(accessToken.value)}`);
       } catch {
         onError('语音识别服务地址非法');
         return;

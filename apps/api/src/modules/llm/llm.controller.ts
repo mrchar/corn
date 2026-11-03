@@ -2,18 +2,20 @@ import { Body, Controller, Get, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Readable } from 'node:stream';
 import type { ReadableStream as NodeWebReadableStream } from 'node:stream/web';
+import { Public } from '../../common/public.decorator';
 
 /**
  * LLM 代理 = 标准 OpenAI 兼容反向代理，零业务语义、零智能体逻辑。
  * 请求原样转发、响应原样回传（含 SSE 流）；大模型配置（模型 ID、凭据）全部在后端注入：
- * Authorization 头承载的是本系统自有认证凭据（未来实现），必须剥离、绝不透传给上游。
+ * Authorization 头承载的是本系统自有认证凭据（JWT，由全局 AuthGuard 校验），必须剥离、绝不透传给上游。
  * 智能体的系统提示、工具 schema、执行循环全部在前端。
  */
 
 /** 上游 OpenAI 兼容端点默认地址（火山方舟北京站） */
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
 
-/** 可达性探测端点：前端据此确认代理可用（无空间路径，公开） */
+/** 可达性探测端点：前端据此确认代理可用（公开，无空间路径） */
+@Public()
 @Controller('agent')
 export class LlmProxyController {
   @Get('status')

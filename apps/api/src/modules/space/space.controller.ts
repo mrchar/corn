@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import type { AuthenticatedRequest } from '../../common/auth.guard';
 import { ListQuery } from '../../common/pagination';
 import { success } from '../../common/response';
 import { CreateSpaceDto, UpdateSpaceDto } from './space.dto';
@@ -9,13 +10,13 @@ export class SpaceController {
   constructor(private readonly spaces: SpaceService) {}
 
   @Get()
-  async list(@Query() query: ListQuery) {
-    return this.spaces.list(query);
+  async list(@Query() query: ListQuery, @Req() req: AuthenticatedRequest) {
+    return this.spaces.list(query, req.user!.id);
   }
 
   @Post()
-  async create(@Body() dto: CreateSpaceDto) {
-    const space = await this.spaces.create(dto);
+  async create(@Body() dto: CreateSpaceDto, @Req() req: AuthenticatedRequest) {
+    const space = await this.spaces.create(dto, req.user!.id);
     return success('空间已创建', space);
   }
 

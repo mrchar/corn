@@ -11,19 +11,50 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// 用户：注册登录的主体，空间归属人
+model User {
+  id           String   @id
+  username     String   @unique
+  /// 格式："scrypt$salt$hash"（salt 与 hash 均为 hex）
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  spaces        Space[]
+  refreshTokens RefreshToken[]
+}
+
+/// 刷新令牌：哈希落库，支持轮换与吊销
+model RefreshToken {
+  id        String    @id
+  userId    String
+  /// sha256(refreshToken) 的 hex，原文不落库
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
 /// 空间：完全隔离的边界，也是接口路径前缀的载体
 model Space {
   id        String   @id
+  /// 归属用户；存量数据为空（不可见），新建空间由业务层强制填写
+  ownerId   String?
   name      String
   code      String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  domains     Domain[]
-  groups      Group[]
-  types       ResourceType[]
-  resources   Resource[]
-  entries     LedgerEntry[]
+  owner      User?  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  domains    Domain[]
+  groups     Group[]
+  types      ResourceType[]
+  resources  Resource[]
+  entries    LedgerEntry[]
   reservations Reservation[]
   templateSettings SpaceTemplateSetting[]
 }
