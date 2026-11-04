@@ -12,6 +12,7 @@ import { ResourceTypeModule } from './modules/resource-type/resource-type.module
 import { LedgerModule } from './modules/ledger/ledger.module';
 import { MetadataModule } from './modules/metadata/metadata.module';
 import { AsrModule } from './modules/asr/asr.module';
+import { UsersModule } from './modules/users/users.module';
 // 注意：ResourceModule 提供动态路径 spaces/:spaceId/:typeCode，必须在所有固定路径模块之后注册，
 // 否则 creations / reservations / resource-types 等固定端点会被吞掉。
 import { ResourceModule } from './modules/resource/resource.module';
@@ -29,6 +30,8 @@ import { LlmModule } from './modules/llm/llm.module';
     MetadataModule,
     // AsrModule 提供固定路径 /asr/* 与 WS /ws/asr，同样须在动态路由模块之前注册。
     AsrModule,
+    // UsersModule 提供固定路径 /users/me（当前用户信息与用户级组织开关）。
+    UsersModule,
     // ResourceModule 提供动态路径 spaces/:spaceId/:typeCode，必须在所有固定路径模块之后注册。
     ResourceModule,
     // LedgerModule 依赖 ResourceModule，放在最后以确保固定端点优先于动态路由。

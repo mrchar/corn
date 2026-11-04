@@ -15,6 +15,11 @@ export default defineConfig({
         target: 'http://localhost:4000',
         changeOrigin: true,
       },
+      // 当前用户信息与用户级组织开关
+      '/users': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+      },
       // ASR 能力探测（HTTP）
       '/asr': {
         target: 'http://localhost:4000',

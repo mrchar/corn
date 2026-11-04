@@ -1,5 +1,5 @@
 import { computed, ref, watch } from 'vue';
-import { listDomains, listSpaces, type Domain, type Space } from '../api';
+import { getMe, listDomains, listSpaces, updateMe, type Domain, type Space } from '../api';
 
 /** 顶层视图：资源池消费资源，资源类型是空间配置，组织维护空间/领域/群组 */
 export const currentView = ref<'pool' | 'types' | 'org'>('pool');
@@ -14,6 +14,34 @@ export const spaces = ref<Space[]>([]);
 export const spaceId = ref('');
 export const domains = ref<Domain[]>([]);
 export const domainId = ref('');
+
+/* ---------- 组织概念显隐开关 ---------- */
+
+/** 用户级偏好：使用空间（关闭时仅使用默认空间，侧栏不出现空间选择器） */
+export const userPrefs = ref({ enableSpace: false });
+
+/** 当前空间对象：空间级开关（使用领域/使用群组）的载体 */
+export const currentSpace = computed(() => spaces.value.find((s) => s.id === spaceId.value));
+/** 领域概念对当前空间是否可见：关闭时所有领域选项兜底默认领域 */
+export const domainEnabled = computed(() => currentSpace.value?.enableDomain ?? false);
+/** 群组概念对当前空间是否可见：关闭时所有群组选项兜底默认群组 */
+export const groupEnabled = computed(() => currentSpace.value?.enableGroup ?? false);
+
+/** 拉取用户偏好（initApp 时调用） */
+export async function loadUserPrefs() {
+  try {
+    const res = await getMe();
+    if (res.data) userPrefs.value = { enableSpace: res.data.enableSpace };
+  } catch {
+    /* 偏好拉取失败按默认关闭处理 */
+  }
+}
+
+/** 更新用户级偏好（组织页开关用） */
+export async function saveUserPrefs(patch: { enableSpace?: boolean }) {
+  const res = await updateMe(patch);
+  if (res.data) userPrefs.value = { enableSpace: res.data.enableSpace };
+}
 
 /** 全局数据版本号：任意写操作成功后递增，驱动各视图重新拉取列表（智能体写库后页面即时反映） */
 export const dataVersion = ref(0);
@@ -52,10 +80,11 @@ export async function reloadDomains() {
   domains.value = res.list;
 }
 
-/** 应用初始化：加载空间列表并默认选中第一个（幂等，可重复调用） */
+/** 应用初始化：加载用户偏好与空间列表并默认选中第一个（幂等，可重复调用） */
 export async function initApp() {
   if (inited) return;
   inited = true;
+  await loadUserPrefs();
   await reloadSpaces();
 }
 

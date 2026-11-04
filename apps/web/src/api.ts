@@ -121,6 +121,23 @@ export async function logoutApi(): Promise<void> {
   }
 }
 
+/* ---------- 当前用户与偏好 ---------- */
+
+export interface Me {
+  id: string;
+  username: string;
+  /** 使用空间开关（用户级）：关闭时仅使用默认空间 */
+  enableSpace: boolean;
+}
+
+export function getMe() {
+  return request<ApiSuccess<Me>>('GET', '/users/me');
+}
+
+export function updateMe(payload: { enableSpace?: boolean }) {
+  return request<ApiSuccess<Me>>('PATCH', '/users/me', payload);
+}
+
 /* ---------- 空间与领域 ---------- */
 
 export interface Space {
@@ -128,6 +145,10 @@ export interface Space {
   name: string;
   description?: string;
   status: string;
+  /** 使用领域开关（空间级）：关闭时领域概念全空间不可见 */
+  enableDomain?: boolean;
+  /** 使用群组开关（空间级）：关闭时群组概念全空间不可见 */
+  enableGroup?: boolean;
 }
 
 export interface Domain {
@@ -150,8 +171,11 @@ export function createSpace(payload: SpacePayload) {
   return request<ApiSuccess<{ id: string }>>('POST', '/spaces', payload);
 }
 
-export function updateSpace(spaceId: string, name: string) {
-  return request<ApiSuccess>('PATCH', `/spaces/${spaceId}`, { name });
+export function updateSpace(
+  spaceId: string,
+  payload: { name?: string; enableDomain?: boolean; enableGroup?: boolean },
+) {
+  return request<ApiSuccess>('PATCH', `/spaces/${spaceId}`, payload);
 }
 
 export function listDomains(spaceId: string) {

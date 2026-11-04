@@ -17,6 +17,8 @@ model User {
   username     String   @unique
   /// 格式："scrypt$salt$hash"（salt 与 hash 均为 hex）
   passwordHash String
+  /// 使用空间开关（用户级）：关闭时仅使用默认空间，打开后可创建多个空间
+  enableSpace  Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -46,6 +48,10 @@ model Space {
   ownerId   String?
   name      String
   code      String   @unique
+  /// 使用领域开关（空间级）：关闭时领域概念全空间不可见，领域选项兜底默认领域
+  enableDomain Boolean @default(false)
+  /// 使用群组开关（空间级）：关闭时群组概念全空间不可见，群组选项兜底默认群组
+  enableGroup  Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

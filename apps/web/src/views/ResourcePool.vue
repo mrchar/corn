@@ -13,7 +13,8 @@ import {
   type LedgerEntry,
   type Reservation,
 } from '../api';
-import { dataVersion, domains, domainId, domainOptions, spaceId } from '../store/app';
+import { currentView, dataVersion, domainEnabled, domains, domainId, domainOptions, spaceId } from '../store/app';
+import { accessToken } from '../store/auth';
 import AppLayout from '../layouts/AppLayout.vue';
 
 const { Table, Form, Dialog, Drawer, Button, Space, Typography, Descriptions, Tabs, Empty, Dropdown, Select, FloatButton, Icon } = components;
@@ -25,6 +26,8 @@ const isMobile = useMediaQuery('(max-width: 767px)');
 const pool = useResources({
   server: `/spaces/${spaceId.value}`,
   doc: '/openapi.json',
+  // openapi.json 需鉴权：函数形式保证 token 静默续期后新请求携带新凭据
+  headers: (): Record<string, string> => (accessToken.value ? { Authorization: `Bearer ${accessToken.value}` } : {}),
   refine: (schema) => {
     const resources = { ...(schema.resources ?? {}) };
     delete resources['流转'];
@@ -47,6 +50,9 @@ const client = computed<ResourceClient | null>(() => {
   return pool.client(activeType.value);
 });
 
+/** 无资源类型时「新建资源」无可用表单，入口整体隐藏并引导先创建类型 */
+const hasTypes = computed(() => typeNames.value.length > 0);
+
 const columns = computed(() => {
   if (!client.value) return [];
   return [
@@ -58,7 +64,8 @@ const columns = computed(() => {
 /** fetch 属性身份随 activeType/domainId/dataVersion 变化，驱动 Table 重新拉取 */
 const fetchFn = computed(() => {
   const current = client.value;
-  const domainFilter = domainId.value;
+  // 使用领域关闭时不应用领域筛选（选项已隐藏，避免残留值静默过滤）
+  const domainFilter = domainEnabled.value ? domainId.value : '';
   void dataVersion.value; // 智能体等渠道写库后自动重拉
   return (async (query: any) => {
     if (!current) return { list: [] as any[], total: 0 };
@@ -80,19 +87,21 @@ const formProperties = computed<ResourceField[]>(() => {
   const propsList = client.value.properties.filter((f: ResourceField) =>
     formMode.value === 'create' ? f.scope?.create : f.scope?.update,
   );
-  return propsList.map((f: ResourceField) => {
-    if (f.name === 'domainId') {
-      return {
-        name: f.name,
-        label: f.label,
-        type: 'enum' as const,
-        options: domains.value.map((d) => ({ label: d.name, value: d.id })),
-        control: 'select',
-        required: true,
-      };
-    }
-    return f;
-  });
+  return propsList
+    .filter((f: ResourceField) => f.name !== 'domainId' || domainEnabled.value)
+    .map((f: ResourceField) => {
+      if (f.name === 'domainId') {
+        return {
+          name: f.name,
+          label: f.label,
+          type: 'enum' as const,
+          options: domains.value.map((d) => ({ label: d.name, value: d.id })),
+          control: 'select',
+          required: true,
+        };
+      }
+      return f;
+    });
 });
 
 function openCreate() {
@@ -162,7 +171,8 @@ const detailItems = computed(() => {
   return [
     { label: '名称', value: String(row.name ?? '') },
     { label: '类型', value: String(row.typeName ?? '') },
-    { label: '领域', value: String(row.domainName ?? '') },
+    // 使用领域关闭时不展示领域概念（归属已静默落在默认领域）
+    ...(domainEnabled.value ? [{ label: '领域', value: String(row.domainName ?? '') }] : []),
     { label: '计量单位', value: String(row.unit ?? '') },
     { label: '状态', value: row.status === 'archived' ? '已归档' : '正常' },
     { label: '总量', value: String(row.total ?? 0) },
@@ -313,7 +323,9 @@ const ledgerColumns = [
   <AppLayout>
     <template #title>资源池</template>
     <template #filters>
+      <!-- 使用领域关闭（空间级开关）时不展示领域概念，筛选静默落在全部（默认领域） -->
       <Select
+        v-if="domainEnabled"
         v-model="domainId"
         :options="domainOptions"
         placeholder="领域筛选"
@@ -322,7 +334,7 @@ const ledgerColumns = [
       />
     </template>
     <template #primary-action>
-      <Button v-if="!isMobile" type="primary" @click="openCreate">
+      <Button v-if="!isMobile && hasTypes" type="primary" @click="openCreate">
         <Icon><path d="M12 5v14M5 12h14" /></Icon> 新建
       </Button>
     </template>
@@ -333,8 +345,11 @@ const ledgerColumns = [
     <div v-else-if="pool.state.status === 'error'" style="text-align: center; padding: 48px">
       <Typography :level="0" style="color: #dc2626">元数据加载失败</Typography>
     </div>
-    <div v-else-if="typeNames.length === 0">
-      <Empty description="当前空间暂无可用资源类型" />
+    <div v-else-if="typeNames.length === 0" style="display: grid; place-items: center; padding: 48px; gap: 16px">
+      <Empty description="还没有资源类型，请先创建资源类型" />
+      <Button type="primary" @click="currentView = 'types'">
+        <Icon><path d="M12 5v14M5 12h14" /></Icon> 去创建资源类型
+      </Button>
     </div>
     <div v-else>
       <Tabs v-model="activeType" :tabs="typeNames.map((n: string) => ({ key: n, label: n }))" />
@@ -440,7 +455,7 @@ const ledgerColumns = [
     />
   </Dialog>
 
-  <!-- 手机端主操作：fixed 定位不受挂载位置影响，动作与桌面页头按钮同源 -->
-  <FloatButton v-if="isMobile" :actions="[{ key: 'create', label: '新建资源' }]" @select="(key: string) => key === 'create' && openCreate()" />
+  <!-- 手机端主操作：fixed 定位不受挂载位置影响，动作与桌面页头按钮同源；无类型时隐藏 -->
+  <FloatButton v-if="isMobile && hasTypes" :actions="[{ key: 'create', label: '新建资源' }]" @select="(key: string) => key === 'create' && openCreate()" />
   </AppLayout>
 </template>

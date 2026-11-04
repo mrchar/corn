@@ -7,6 +7,7 @@ import {
   menuItems,
   spaceId,
   spaceOptions,
+  userPrefs,
 } from '../store/app';
 import { currentUser, clearAuth } from '../store/auth';
 import { logoutApi } from '../api';
@@ -41,7 +42,8 @@ async function handleLogout() {
     <template #sider>
       <div class="app-sider">
         <Typography :level="3" style="margin: 0; font-size: 16px">资源管理云服务</Typography>
-        <Select v-model="spaceId" :options="spaceOptions" placeholder="选择空间" />
+        <!-- 使用空间关闭（用户级开关）时不展示空间概念，静默使用默认空间 -->
+        <Select v-if="userPrefs.enableSpace" v-model="spaceId" :options="spaceOptions" placeholder="选择空间" />
         <nav class="app-menu">
           <button
             v-for="item in menuItems"
@@ -84,7 +86,7 @@ async function handleLogout() {
     </header>
     <Drawer v-model:open="drawerOpen" direction="left" size="280px" title="资源管理云服务">
       <div class="app-drawer-body">
-        <Select v-model="spaceId" :options="spaceOptions" placeholder="选择空间" />
+        <Select v-if="userPrefs.enableSpace" v-model="spaceId" :options="spaceOptions" placeholder="选择空间" />
         <nav class="app-menu">
           <button
             v-for="item in menuItems"

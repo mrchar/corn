@@ -13,7 +13,7 @@ import {
   type Domain,
   type ResourceType,
 } from '../api';
-import { dataVersion, spaceId as appSpaceId } from '../store/app';
+import { dataVersion, domainEnabled, spaceId as appSpaceId } from '../store/app';
 import AppLayout from '../layouts/AppLayout.vue';
 
 const { Table, Dialog, Button, Space, Select, Input, InputNumber, Switch, Tag, Typography, Empty, FloatButton, Icon } = components;
@@ -50,10 +50,11 @@ const fetchFn = computed(() => {
   }) as any;
 });
 
-const columns = [
+/** 使用领域关闭（空间级开关）时隐藏「归属领域」列，资源类型静默归属默认领域 */
+const columns = computed(() => [
   { key: 'name', title: '类型名称' },
   { key: 'code', title: '编码' },
-  { key: 'domainName', title: '归属领域' },
+  ...(domainEnabled.value ? [{ key: 'domainName', title: '归属领域' }] : []),
   { key: 'unit', title: '计量单位' },
   { key: 'origin', title: '来源', type: 'enum' as const, options: [
     { label: '自定义', value: 'custom' },
@@ -67,7 +68,7 @@ const columns = [
   { key: 'fieldCount', title: '自定义字段' },
   { key: 'resourceCount', title: '实例数' },
   { key: 'actions', title: '操作', width: '150px' },
-];
+]);
 
 watch(appSpaceId, async (sid) => {
   domains.value = [];
@@ -362,7 +363,7 @@ const deriveAction = async () => {
           <Typography :level="0">类型名称</Typography>
           <Input v-model="form.name" placeholder="如 配额资源" />
         </label>
-        <label style="display: grid; gap: 4px">
+        <label v-if="domainEnabled" style="display: grid; gap: 4px">
           <Typography :level="0">归属领域</Typography>
           <Select v-model="form.domainId" :options="domainOptions" placeholder="选择领域" />
         </label>
@@ -476,7 +477,7 @@ const deriveAction = async () => {
             ]"
           />
         </label>
-        <label style="display: grid; gap: 4px">
+        <label v-if="domainEnabled" style="display: grid; gap: 4px">
           <Typography :level="0">归属领域</Typography>
           <Select v-model="deriveDomainId" :options="deriveDomainOptions" placeholder="选择领域" />
         </label>

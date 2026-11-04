@@ -12,10 +12,10 @@ import {
   updateGroup,
   updateSpace,
 } from '../api';
-import { dataVersion, domains, reloadDomains, reloadSpaces, spaceId, spaces } from '../store/app';
+import { dataVersion, domains, domainEnabled, groupEnabled, reloadDomains, reloadSpaces, saveUserPrefs, spaceId, spaces, userPrefs } from '../store/app';
 import AppLayout from '../layouts/AppLayout.vue';
 
-const { Table, Dialog, Button, Space, Input, Select, Typography, Empty, FloatButton, Icon, List, ListItem } = components;
+const { Table, Dialog, Button, Space, Input, Select, Typography, Empty, FloatButton, Icon, List, ListItem, Switch } = components;
 const { message, useMediaQuery } = composables;
 
 /** 视窗分支：桌面页头文字按钮 / 手机悬浮圆钮，动作同源 */
@@ -29,6 +29,9 @@ const codeRule = /^[a-z][a-z0-9-]*$/;
 
 /** 三个分区共用的行结构（Table 插槽的 row 为宽类型，传参处断言）；children 为群组嵌套子树 */
 interface MetaRow { id: string; code: string; name: string; parentId?: string | null; children?: MetaRow[] }
+
+/** 空间行：附两个空间级配置开关（使用领域/使用群组）；code 由后端返回，前端类型放宽为可选 */
+interface SpaceRow { id: string; name: string; code?: string; enableDomain?: boolean; enableGroup?: boolean }
 
 /* ---------- 表格数据：空间/领域来自全局 store，群组页面内管理 ---------- */
 
@@ -89,6 +92,15 @@ const metaColumns = [
   { key: 'actions', title: '操作', width: '150px' },
 ];
 
+/** 空间表：附两个空间级配置开关列（每个空间分别配置，开关落在卡片底部） */
+const spaceColumns = [
+  { key: 'code', title: '编码' },
+  { key: 'name', title: '名称' },
+  { key: 'enableDomain', title: '使用领域', width: '110px' },
+  { key: 'enableGroup', title: '使用群组', width: '110px' },
+  { key: 'actions', title: '操作', width: '150px' },
+];
+
 /* ---------- 弹窗状态：新建/编辑共用 ---------- */
 
 const formOpen = ref(false);
@@ -115,7 +127,7 @@ const formAction = async () => {
       await createSpace({ code, name });
       message.success('空间已创建');
     } else {
-      await updateSpace(editingId.value, name);
+      await updateSpace(editingId.value, { name });
       message.success('空间已更新');
     }
     await reloadSpaces();
@@ -185,13 +197,49 @@ const removeAction = async () => {
   removeOpen.value = false;
 };
 
-/* ---------- 主操作：分区自包含（桌面分区按钮），手机端悬浮圆钮三动作 ---------- */
+/* ---------- 开关：使用空间（用户级，顶部）；使用领域/使用群组为空间级，配置在各自空间卡片上 ---------- */
 
-const fabActions = [
-  { key: 'space', label: '新建空间' },
-  { key: 'domain', label: '新建领域' },
-  { key: 'group', label: '新建群组' },
-];
+/** 可写 computed 兼作开关绑定与失败回滚：写失败时底层状态不变，Switch 自动回弹 */
+const spaceToggle = computed({
+  get: () => userPrefs.value.enableSpace,
+  set: async (val: boolean) => {
+    try {
+      await saveUserPrefs({ enableSpace: val });
+      message.success(val ? '已开启使用空间' : '已关闭使用空间');
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '操作失败，请稍后重试');
+    }
+  },
+});
+
+/** 关闭约束：已有多个对象时禁止关闭对应开关（服务端强校验，前端禁用态/错误条提示） */
+const spaceSwitchDisabled = computed(() => spaces.value.length > 1);
+const domainSwitchDisabled = computed(() => domains.value.length > 1);
+const groupSwitchDisabled = computed(() => groups.value.length > 1);
+
+/** 空间卡片上的开关：受控绑定（失败不落库自动回弹），当前空间的计数约束前端预禁用，其余空间由服务端 409 把关 */
+async function setSpaceFlag(row: SpaceRow, flag: 'enableDomain' | 'enableGroup', val: boolean) {
+  try {
+    await updateSpace(row.id, { [flag]: val });
+    await reloadSpaces();
+    tableKey.value++;
+    message.success(
+      val
+        ? flag === 'enableDomain' ? '已开启使用领域' : '已开启使用群组'
+        : flag === 'enableDomain' ? '已关闭使用领域' : '已关闭使用群组',
+    );
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '操作失败，请稍后重试');
+  }
+}
+
+/* ---------- 主操作：分区自包含（桌面分区按钮），手机端悬浮圆钮按可见分区过滤 ---------- */
+
+const fabActions = computed(() => [
+  ...(userPrefs.value.enableSpace ? [{ key: 'space', label: '新建空间' }] : []),
+  ...(domainEnabled.value ? [{ key: 'domain', label: '新建领域' }] : []),
+  ...(groupEnabled.value ? [{ key: 'group', label: '新建群组' }] : []),
+]);
 
 function onPrimarySelect(key: string) {
   openForm('create', key as Section);
@@ -202,18 +250,48 @@ function onPrimarySelect(key: string) {
   <AppLayout>
     <template #title>组织</template>
 
-    <!-- 空间 -->
-    <section class="org-section">
+    <!-- 开关区：仅使用空间（用户级）；使用领域/使用群组按空间配置，开关在各自空间卡片上 -->
+    <section class="org-section org-switches">
+      <div class="org-switch-item">
+        <div class="org-switch-item__text">
+          <Typography :level="0" style="font-weight: 600">使用空间</Typography>
+          <Typography :level="0" style="color: #6b7280">开启后可创建多个空间，实现人员隔离；每个空间可单独配置是否使用领域与群组</Typography>
+          <Typography v-if="spaceSwitchDisabled" :level="0" style="color: #d97706">已创建多个空间，无法关闭</Typography>
+        </div>
+        <Switch v-model="spaceToggle" :disabled="spaceSwitchDisabled" />
+      </div>
+    </section>
+
+    <!-- 空间：未开启使用空间时整体不显示；开启后展示全部空间，卡片上按空间分别配置领域与群组 -->
+    <section v-if="userPrefs.enableSpace" class="org-section">
       <div class="org-section__head">
         <div>
           <Typography :level="1">空间</Typography>
-          <Typography :level="0" style="color: #6b7280">完全隔离的顶层边界，接口路径前缀的载体</Typography>
+          <Typography :level="0" style="color: #6b7280">完全隔离的顶层边界；卡片上的开关按空间分别控制领域与群组的使用</Typography>
         </div>
         <Button v-if="!isMobile" @click="openForm('create', 'space')">
           <Icon><path d="M12 5v14M5 12h14" /></Icon> 新建空间
         </Button>
       </div>
-      <Table :key="`sp-${tableKey}`" :columns="metaColumns" :fetch="spacesFetch" responsive card-breakpoint="767px">
+      <Table :key="`sp-${tableKey}`" :columns="spaceColumns" :fetch="spacesFetch" responsive card-breakpoint="767px">
+        <template #cell-enableDomain="{ row }">
+          <Switch
+            :model-value="!!(row as unknown as SpaceRow).enableDomain"
+            :disabled="(row as unknown as SpaceRow).id === spaceId && domainSwitchDisabled"
+            :title="domainSwitchDisabled ? '已创建多个领域，无法关闭' : undefined"
+            style="white-space: nowrap; flex-shrink: 0"
+            @update:model-value="(v: boolean) => setSpaceFlag(row as unknown as SpaceRow, 'enableDomain', v)"
+          />
+        </template>
+        <template #cell-enableGroup="{ row }">
+          <Switch
+            :model-value="!!(row as unknown as SpaceRow).enableGroup"
+            :disabled="(row as unknown as SpaceRow).id === spaceId && groupSwitchDisabled"
+            :title="groupSwitchDisabled ? '已创建多个群组，无法关闭' : undefined"
+            style="white-space: nowrap; flex-shrink: 0"
+            @update:model-value="(v: boolean) => setSpaceFlag(row as unknown as SpaceRow, 'enableGroup', v)"
+          />
+        </template>
         <template #cell-actions="{ row }">
           <Button size="sm" style="white-space: nowrap; flex-shrink: 0" @click="openForm('update', 'space', row as unknown as MetaRow)">重命名</Button>
         </template>
@@ -221,7 +299,7 @@ function onPrimarySelect(key: string) {
     </section>
 
     <!-- 领域 -->
-    <section class="org-section">
+    <section v-if="domainEnabled" class="org-section">
       <div class="org-section__head">
         <div>
           <Typography :level="1">领域</Typography>
@@ -242,7 +320,7 @@ function onPrimarySelect(key: string) {
     </section>
 
     <!-- 群组 -->
-    <section class="org-section">
+    <section v-if="groupEnabled" class="org-section">
       <div class="org-section__head">
         <div>
           <Typography :level="1">群组</Typography>
@@ -322,6 +400,33 @@ function onPrimarySelect(key: string) {
   display: grid;
   gap: 12px;
   margin-bottom: 28px;
+}
+
+/* 开关区：三行开关（名称+说明左对齐，开关右对齐），带边框卡片化 */
+.org-switches {
+  gap: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 4px 16px;
+  background: #fff;
+}
+
+.org-switch-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+}
+
+.org-switch-item + .org-switch-item {
+  border-top: 1px solid #f3f4f6;
+}
+
+.org-switch-item__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
 .org-section__head {

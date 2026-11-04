@@ -1,4 +1,4 @@
-import { IsOptional, IsString, Length, Matches } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, Length, Matches } from 'class-validator';
 
 export class CreateSpaceDto {
   @IsString()
@@ -16,4 +16,12 @@ export class UpdateSpaceDto {
   @IsString()
   @Length(1, 60)
   name?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  enableDomain?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  enableGroup?: boolean;
 }

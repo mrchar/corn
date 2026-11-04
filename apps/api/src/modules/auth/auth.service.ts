@@ -58,7 +58,28 @@ export class AuthService {
         passwordHash: hashPassword(dto.password),
       },
     });
+    await this.provisionDefaults(user.id);
     return this.issueTokens(user.id, user.username);
+  }
+
+  /**
+   * 注册自动开通：默认空间 + 默认领域 + 默认群组。
+   * 普通用户无需理解组织概念；默认空间 code 由 userId 派生（hex 片段，全局唯一且满足编码规则）。
+   */
+  private async provisionDefaults(userId: string): Promise<void> {
+    const spaceId = newId('sp');
+    const domainId = newId('dm');
+    await this.prisma.$transaction([
+      this.prisma.space.create({
+        data: { id: spaceId, ownerId: userId, code: `u-${userId.slice(3)}`, name: '个人空间' },
+      }),
+      this.prisma.domain.create({
+        data: { id: domainId, spaceId, code: 'default', name: '默认领域' },
+      }),
+      this.prisma.group.create({
+        data: { id: newId('gp'), spaceId, code: 'default', name: '默认群组' },
+      }),
+    ]);
   }
 
   async login(dto: LoginDto): Promise<AuthTokens> {
