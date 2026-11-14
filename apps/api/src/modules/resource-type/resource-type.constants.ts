@@ -8,6 +8,7 @@ import { ErrorCodes } from '../../common/errors';
 export const RESERVED_TYPE_CODES: readonly string[] = [
   'spaces',
   'domains',
+  'groups',
   'resource-types',
   'builtin-templates',
   'resources',

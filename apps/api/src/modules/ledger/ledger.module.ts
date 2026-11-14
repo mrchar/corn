@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 import { ResourceModule } from '../resource/resource.module';
 import { ResourceTypeModule } from '../resource-type/resource-type.module';
-import { LedgerController } from './ledger.controller';
+import { ConsumptionController, CreationController, LedgerController, ReservationController } from './ledger.controller';
 import { LedgerService } from './ledger.service';
 
 @Module({
   imports: [ResourceModule, ResourceTypeModule],
-  controllers: [LedgerController],
+  controllers: [CreationController, ReservationController, ConsumptionController, LedgerController],
   providers: [LedgerService],
   exports: [LedgerService],
 })

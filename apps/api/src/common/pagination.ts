@@ -1,3 +1,5 @@
+import { ApiPropertyOptional } from '@nestjs/swagger';
+
 export type SortDirection = 'asc' | 'desc';
 
 export interface PageRequest {
@@ -7,11 +9,20 @@ export interface PageRequest {
   take: number;
 }
 
+/** 列表查询参数：分页/关键词/排序为所有集合资源共有，字段描述即前端列筛选标签 */
 export class ListQuery {
+  @ApiPropertyOptional({ description: '当前页码', default: 1 })
   page?: string | number;
+
+  @ApiPropertyOptional({ description: '每页数量', default: 20 })
   pageSize?: string | number;
+
+  @ApiPropertyOptional({ description: '关键词' })
   keyword?: string;
+
+  @ApiPropertyOptional({ description: '排序，如 createdAt,desc' })
   sorter?: string;
+
   [key: string]: unknown;
 }
 

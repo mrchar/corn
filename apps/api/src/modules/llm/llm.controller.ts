@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Post, Req, Res } from '@nestjs/common';
+import { ApiExcludeController } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { Readable } from 'node:stream';
 import type { ReadableStream as NodeWebReadableStream } from 'node:stream/web';
@@ -15,6 +16,7 @@ import { Public } from '../../common/public.decorator';
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
 
 /** 可达性探测端点：前端据此确认代理可用（公开，无空间路径） */
+@ApiExcludeController()
 @Public()
 @Controller('agent')
 export class LlmProxyController {

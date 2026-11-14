@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
-import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { SessionsController } from './sessions.controller';
 
 /** 将 env 中的 TTL（如 2h / 30m / 900）解析为秒数，非法时回落 2 小时 */
 function accessTtlSeconds(): number {
@@ -13,8 +13,9 @@ function accessTtlSeconds(): number {
 }
 
 /**
- * 认证模块：注册登录、双令牌签发与校验。
+ * 认证模块：会话资源（登录/续期/登出）、双令牌签发与校验。
  * JWT_SECRET 缺失时在模块初始化阶段即抛错，避免带病启动。
+ * AuthService 导出给 UsersModule（注册 = 创建用户时复用签发逻辑）。
  */
 @Module({
   imports: [
@@ -25,8 +26,8 @@ function accessTtlSeconds(): number {
       signOptions: { expiresIn: accessTtlSeconds() },
     }),
   ],
-  controllers: [AuthController],
+  controllers: [SessionsController],
   providers: [AuthService],
-  exports: [JwtModule],
+  exports: [AuthService, JwtModule],
 })
 export class AuthModule {}

@@ -1,5 +1,5 @@
 import { computed, ref, watch } from 'vue';
-import { getMe, listDomains, listSpaces, updateMe, type Domain, type Space } from '../api';
+import { rootClient, spaceClient } from '../services/pools';
 
 /** 顶层视图：资源池消费资源，资源类型是空间配置，组织维护空间/领域/群组 */
 export const currentView = ref<'pool' | 'types' | 'org'>('pool');
@@ -9,6 +9,23 @@ export const menuItems = [
   { key: 'types', label: '资源类型' },
   { key: 'org', label: '组织' },
 ];
+
+export interface Space {
+  id: string;
+  code: string;
+  name: string;
+  /** 使用领域开关（空间级）：关闭时领域概念全空间不可见 */
+  enableDomain?: boolean;
+  /** 使用群组开关（空间级）：关闭时群组概念全空间不可见 */
+  enableGroup?: boolean;
+  createdAt?: string;
+}
+
+export interface Domain {
+  id: string;
+  code: string;
+  name: string;
+}
 
 export const spaces = ref<Space[]>([]);
 export const spaceId = ref('');
@@ -30,8 +47,8 @@ export const groupEnabled = computed(() => currentSpace.value?.enableGroup ?? fa
 /** 拉取用户偏好（initApp 时调用） */
 export async function loadUserPrefs() {
   try {
-    const res = await getMe();
-    if (res.data) userPrefs.value = { enableSpace: res.data.enableSpace };
+    const me = (await (await rootClient('users')).detail('me')) as { enableSpace: boolean };
+    userPrefs.value = { enableSpace: me.enableSpace };
   } catch {
     /* 偏好拉取失败按默认关闭处理 */
   }
@@ -39,8 +56,8 @@ export async function loadUserPrefs() {
 
 /** 更新用户级偏好（组织页开关用） */
 export async function saveUserPrefs(patch: { enableSpace?: boolean }) {
-  const res = await updateMe(patch);
-  if (res.data) userPrefs.value = { enableSpace: res.data.enableSpace };
+  const me = (await (await rootClient('users')).update('me', patch)) as { enableSpace: boolean };
+  userPrefs.value = { enableSpace: me.enableSpace };
 }
 
 /** 全局数据版本号：任意写操作成功后递增，驱动各视图重新拉取列表（智能体写库后页面即时反映） */
@@ -63,10 +80,10 @@ let inited = false;
 
 /** 拉取空间列表并保底选中一个有效空间（组织页增删改后复用） */
 export async function reloadSpaces() {
-  const res = await listSpaces();
-  spaces.value = res.list;
-  if (res.list.length > 0 && !res.list.some((s) => s.id === spaceId.value)) {
-    spaceId.value = res.list[0].id;
+  const res = await (await rootClient('spaces')).list({ pagination: { currentPage: 1, pageSize: 200 } });
+  spaces.value = res.list as unknown as Space[];
+  if (spaces.value.length > 0 && !spaces.value.some((s) => s.id === spaceId.value)) {
+    spaceId.value = spaces.value[0].id;
   }
 }
 
@@ -76,8 +93,8 @@ export async function reloadDomains() {
     domains.value = [];
     return;
   }
-  const res = await listDomains(spaceId.value);
-  domains.value = res.list;
+  const res = await (await spaceClient('domains')).list({ pagination: { currentPage: 1, pageSize: 200 } });
+  domains.value = res.list as unknown as Domain[];
 }
 
 /** 应用初始化：加载用户偏好与空间列表并默认选中第一个（幂等，可重复调用） */
@@ -95,7 +112,7 @@ watch(spaceId, async (id) => {
     domainId.value = '';
     return;
   }
-  const res = await listDomains(id);
-  domains.value = res.list;
+  const res = await (await spaceClient('domains')).list({ pagination: { currentPage: 1, pageSize: 200 } });
+  domains.value = res.list as unknown as Domain[];
   domainId.value = '';
 });

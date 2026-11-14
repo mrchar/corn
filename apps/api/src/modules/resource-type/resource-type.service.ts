@@ -36,6 +36,7 @@ export interface ResourceTypeView {
   status: string;
   inUse: boolean;
   resourceCount: number;
+  fieldCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -284,6 +285,7 @@ export class ResourceTypeService {
   }
 
   toView(row: ResourceTypeRow, domainName: string, resourceCount: number): ResourceTypeView {
+    const attrSchema = parseJson<AttributeDef[]>(row.attrSchema, []);
     return {
       id: row.id,
       spaceId: row.spaceId,
@@ -296,7 +298,7 @@ export class ResourceTypeService {
       numericScale: row.numericScale,
       divisible: row.divisible,
       allowNegative: row.allowNegative,
-      attrSchema: parseJson<AttributeDef[]>(row.attrSchema, []),
+      attrSchema,
       sourceKinds: parseJson<string[]>(row.sourceKinds, []),
       sinkKinds: parseJson<string[]>(row.sinkKinds, []),
       recommendedTagKeys: parseJson<string[]>(row.recommendedTagKeys, []),
@@ -305,6 +307,7 @@ export class ResourceTypeService {
       status: row.status,
       inUse: row.inUse,
       resourceCount,
+      fieldCount: attrSchema.length,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };

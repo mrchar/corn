@@ -1,34 +1,50 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
-import { ListQuery } from '../../common/pagination';
-import { success } from '../../common/response';
-import { CreateResourceTypeDto, UpdateResourceTypeDto } from './resource-type.dto';
+import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { CreateResourceTypeDto, ResourceTypeListQuery, ResourceTypeListResponse, ResourceTypeResponse, UpdateResourceTypeDto } from './resource-type.dto';
 import { ResourceTypeService } from './resource-type.service';
+import { TemplateService } from './template.service';
 
+/** 资源类型：标准 CRUD；派生 = 创建时携带模板 ID，不设独立动词端点。 */
+@ApiTags('resource-types')
 @Controller('spaces/:spaceId/resource-types')
 export class ResourceTypeController {
-  constructor(private readonly types: ResourceTypeService) {}
+  constructor(
+    private readonly types: ResourceTypeService,
+    private readonly templates: TemplateService,
+  ) {}
 
   @Get()
-  async list(@Param('spaceId') spaceId: string, @Query() query: ListQuery) {
+  @ApiOperation({ summary: '查询资源类型列表' })
+  @ApiOkResponse({ type: ResourceTypeListResponse })
+  async list(@Param('spaceId') spaceId: string, @Query() query: ResourceTypeListQuery) {
     return this.types.list(spaceId, query);
   }
 
   @Post()
+  @ApiOperation({ summary: '创建资源类型（携带 templateId 时按模板派生）' })
+  @ApiOkResponse({ type: ResourceTypeResponse })
   async create(@Param('spaceId') spaceId: string, @Body() dto: CreateResourceTypeDto) {
-    return success('资源类型已创建', await this.types.create(spaceId, dto));
+    if (dto.templateId) {
+      return this.templates.derive(spaceId, dto.templateId, { ...dto, mode: dto.mode ?? 'inherit' });
+    }
+    return this.types.create(spaceId, dto);
   }
 
   @Get(':typeId')
+  @ApiOperation({ summary: '查询资源类型详情' })
+  @ApiOkResponse({ type: ResourceTypeResponse })
   async detail(@Param('spaceId') spaceId: string, @Param('typeId') typeId: string) {
-    return success('查询成功', await this.types.detail(spaceId, typeId));
+    return this.types.detail(spaceId, typeId);
   }
 
   @Patch(':typeId')
+  @ApiOperation({ summary: '更新资源类型' })
+  @ApiOkResponse({ type: ResourceTypeResponse })
   async update(
     @Param('spaceId') spaceId: string,
     @Param('typeId') typeId: string,
     @Body() dto: UpdateResourceTypeDto,
   ) {
-    return success('资源类型已更新', await this.types.update(spaceId, typeId, dto));
+    return this.types.update(spaceId, typeId, dto);
   }
 }

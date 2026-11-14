@@ -14,6 +14,7 @@ import {
   CreateReservationDto,
   ReleaseReservationDto,
   SettleReservationDto,
+  UpdateReservationDto,
 } from './ledger.dto';
 
 export interface LedgerEntryView {
@@ -143,6 +144,18 @@ export class LedgerService {
       });
       return this.toReservationView(reservation);
     });
+  }
+
+  /** 占用记录的属性更新：按目标状态分流为释放或结算（属性更新语义承载动作）。 */
+  async updateReservation(
+    spaceId: string,
+    actorId: string | undefined,
+    reservationId: string,
+    dto: UpdateReservationDto,
+  ): Promise<ReservationView> {
+    return dto.status === 'released'
+      ? this.releaseReservation(spaceId, actorId, reservationId, dto)
+      : this.settleReservation(spaceId, actorId, reservationId, dto);
   }
 
   /** 释放占用：归还可用量。 */
@@ -288,9 +301,13 @@ export class LedgerService {
     return listResult(rows.map((row) => this.toEntryView(row, '')), total);
   }
 
-  async listReservations(spaceId: string, resourceId: string, query: ListQuery): Promise<ListResult<ReservationView>> {
+  async listReservations(spaceId: string, resourceId: string | undefined, query: ListQuery, status?: string): Promise<ListResult<ReservationView>> {
     const paging = resolvePaging(query);
-    const where = { spaceId, resourceId };
+    const where = {
+      spaceId,
+      ...(resourceId ? { resourceId } : {}),
+      ...(status ? { status } : {}),
+    };
     const [rows, total] = await Promise.all([
       this.prisma.reservation.findMany({
         where,

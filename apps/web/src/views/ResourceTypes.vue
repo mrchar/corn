@@ -1,20 +1,54 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { components, composables } from '@mrchar/cumquat';
-import {
-  createResourceType,
-  deriveFromTemplate,
-  listBuiltinTemplates,
-  listDomains,
-  listResourceTypes,
-  updateResourceType,
-  type AttributeDef,
-  type BuiltinTemplate,
-  type Domain,
-  type ResourceType,
-} from '../api';
+import { reloadSpacePoolDoc, spaceClient, spacePool } from '../services/pools';
 import { dataVersion, domainEnabled, spaceId as appSpaceId } from '../store/app';
 import AppLayout from '../layouts/AppLayout.vue';
+
+/** 属性模式定义，与后端 AttributeDef 对齐 */
+interface AttributeDef {
+  key: string;
+  label: string;
+  valueType: 'text' | 'number' | 'enum' | 'boolean';
+  required?: boolean;
+  options?: string[];
+  description?: string;
+}
+
+interface ResourceType {
+  id: string;
+  spaceId: string;
+  domainId: string;
+  domainName: string;
+  code: string;
+  name: string;
+  description: string;
+  unit: string;
+  numericScale: number;
+  divisible: boolean;
+  allowNegative: boolean;
+  attrSchema: AttributeDef[];
+  origin: string;
+  status: 'active' | 'disabled';
+  inUse: boolean;
+  resourceCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface BuiltinTemplate {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  unit: string;
+  enabled?: boolean;
+}
+
+interface DomainOption {
+  id: string;
+  name: string;
+}
 
 const { Table, Dialog, Button, Space, Select, Input, InputNumber, Switch, Tag, Typography, Empty, FloatButton, Icon } = components;
 const { message, useMediaQuery } = composables;
@@ -25,12 +59,22 @@ const isMobile = useMediaQuery('(max-width: 767px)');
 /* ---------- 列表 ---------- */
 
 const refreshTick = ref(0);
-const domains = ref<Domain[]>([]);
+const domains = ref<DomainOption[]>([]);
 const templates = ref<BuiltinTemplate[]>([]);
 
 function refresh() {
   refreshTick.value++;
 }
+
+/** 列表列由空间池的 OpenAPI 文档投影生成，仅补充行操作列 */
+const pool = spacePool();
+const columns = computed(() => {
+  if (!pool.has('resource-types')) return [] as { key: string; title: string }[];
+  const base = pool.client('resource-types').columns.filter(
+    (col) => domainEnabled.value || col.key !== 'domainName',
+  );
+  return [...base, { key: 'actions', title: '操作', width: '150px' }];
+});
 
 /** fetch 属性身份随 refreshTick/dataVersion/spaceId 变化，驱动 Table 重新拉取 */
 const fetchFn = computed(() => {
@@ -39,47 +83,21 @@ const fetchFn = computed(() => {
   void dataVersion.value; // 智能体等渠道写库后自动重拉
   return (async (query: any) => {
     if (!sid) return { list: [] as any[], total: 0 };
-    const res = await listResourceTypes(sid, {
-      page: query.page as number | undefined,
-      pageSize: query.pageSize as number | undefined,
-    });
-    return {
-      list: res.list.map((t) => ({ ...t, fieldCount: t.attrSchema.length })),
-      total: res.total,
-    };
+    const client = await spaceClient('resource-types');
+    return client.list(query);
   }) as any;
 });
-
-/** 使用领域关闭（空间级开关）时隐藏「归属领域」列，资源类型静默归属默认领域 */
-const columns = computed(() => [
-  { key: 'name', title: '类型名称' },
-  { key: 'code', title: '编码' },
-  ...(domainEnabled.value ? [{ key: 'domainName', title: '归属领域' }] : []),
-  { key: 'unit', title: '计量单位' },
-  { key: 'origin', title: '来源', type: 'enum' as const, options: [
-    { label: '自定义', value: 'custom' },
-    { label: '模板继承', value: 'builtin-inherited' },
-    { label: '模板改写', value: 'builtin-rewritten' },
-  ]},
-  { key: 'status', title: '状态', type: 'enum' as const, options: [
-    { label: '启用', value: 'active' },
-    { label: '停用', value: 'disabled' },
-  ]},
-  { key: 'fieldCount', title: '自定义字段' },
-  { key: 'resourceCount', title: '实例数' },
-  { key: 'actions', title: '操作', width: '150px' },
-]);
 
 watch(appSpaceId, async (sid) => {
   domains.value = [];
   templates.value = [];
   if (!sid) return;
   const [domainRes, templateRes] = await Promise.all([
-    listDomains(sid),
-    listBuiltinTemplates(sid),
+    (await spaceClient('domains')).list({ pagination: { currentPage: 1, pageSize: 200 } }),
+    (await spaceClient('builtin-templates')).list({ pagination: { currentPage: 1, pageSize: 200 } }),
   ]);
-  domains.value = domainRes.list;
-  templates.value = templateRes.list;
+  domains.value = domainRes.list as unknown as DomainOption[];
+  templates.value = templateRes.list as unknown as BuiltinTemplate[];
 }, { immediate: true });
 
 /* ---------- 创建 / 编辑 ---------- */
@@ -141,29 +159,30 @@ function openCreate() {
   formOpen.value = true;
 }
 
-function openUpdate(row: Record<string, unknown>) {
-  const t = row as unknown as ResourceType;
+/** 列表项只含展示字段，编辑所需的完整定义从详情接口取 */
+async function openUpdate(row: Record<string, unknown>) {
+  const detail = (await (await spaceClient('resource-types')).detail(row.id as string)) as unknown as ResourceType;
   formMode.value = 'update';
-  editing.value = t;
+  editing.value = detail;
   form.value = {
-    code: t.code,
-    name: t.name,
-    domainId: t.domainId,
-    description: t.description,
-    unit: t.unit,
-    numericScale: t.numericScale,
-    divisible: t.divisible,
-    allowNegative: t.allowNegative,
+    code: detail.code,
+    name: detail.name,
+    domainId: detail.domainId,
+    description: detail.description,
+    unit: detail.unit,
+    numericScale: detail.numericScale,
+    divisible: detail.divisible,
+    allowNegative: detail.allowNegative,
   };
-  attrRows.value = t.attrSchema.map((def) => ({
+  attrRows.value = detail.attrSchema.map((def) => ({
     key: def.key,
     label: def.label,
     valueType: def.valueType,
     required: !!def.required,
     optionsText: (def.options ?? []).join(','),
   }));
-  frozenKeys.value = t.attrSchema.map((def) => def.key);
-  frozenMeasure.value = t.inUse;
+  frozenKeys.value = detail.attrSchema.map((def) => def.key);
+  frozenMeasure.value = detail.inUse;
   formOpen.value = true;
 }
 
@@ -240,8 +259,9 @@ const submitAction = async () => {
   const invalid = validateRows();
   // 校验失败以异常结束，Dialog 保持打开并展示错误条
   if (invalid) throw new Error(invalid);
+  const client = await spaceClient('resource-types');
   if (formMode.value === 'create') {
-    await createResourceType(appSpaceId.value, {
+    await client.create({
       code: form.value.code,
       name: form.value.name.trim(),
       domainId: form.value.domainId,
@@ -254,7 +274,7 @@ const submitAction = async () => {
     });
     message.success('资源类型已创建');
   } else if (editing.value) {
-    await updateResourceType(appSpaceId.value, editing.value.id, {
+    await client.update(editing.value.id, {
       name: form.value.name.trim(),
       domainId: form.value.domainId,
       description: form.value.description.trim(),
@@ -269,6 +289,7 @@ const submitAction = async () => {
     message.success('资源类型已更新');
   }
   formOpen.value = false;
+  reloadSpacePoolDoc();
   refresh();
 };
 
@@ -277,8 +298,9 @@ const submitAction = async () => {
 const toggleStatus = async (row: Record<string, unknown>) => {
   const t = row as unknown as ResourceType;
   const next = t.status === 'active' ? 'disabled' : 'active';
-  await updateResourceType(appSpaceId.value, t.id, { status: next });
+  await (await spaceClient('resource-types')).update(t.id, { status: next });
   message.success(next === 'disabled' ? '类型已停用' : '类型已启用');
+  reloadSpacePoolDoc();
   refresh();
 };
 
@@ -306,12 +328,15 @@ function openDerive() {
 const deriveAction = async () => {
   if (!deriveTemplateId.value) throw new Error('请选择内建模板');
   if (!deriveDomainId.value) throw new Error('请选择归属领域');
-  await deriveFromTemplate(appSpaceId.value, deriveTemplateId.value, {
+  // 派生 = 创建资源类型的一种形态（POST /resource-types 携带 templateId）
+  await (await spaceClient('resource-types')).create({
+    templateId: deriveTemplateId.value,
     mode: deriveMode.value,
     domainId: deriveDomainId.value,
   });
   message.success(deriveMode.value === 'inherit' ? '已从模板继承创建' : '已从模板改写创建');
   deriveOpen.value = false;
+  reloadSpacePoolDoc();
   refresh();
 };
 </script>

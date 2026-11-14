@@ -2,46 +2,51 @@
 import { computed, ref, watch } from 'vue';
 import { components, composables } from '@mrchar/cumquat';
 import type { ResourceField, ResourceClient } from '@mrchar/cumquat/composables';
-import {
-  createConsumption,
-  createCreation,
-  createReservation,
-  listLedger,
-  listReservations,
-  releaseReservation,
-  settleReservation,
-  type LedgerEntry,
-  type Reservation,
-} from '../api';
+import { spaceClient, spacePool, STATIC_RESOURCE_NAMES } from '../services/pools';
 import { currentView, dataVersion, domainEnabled, domains, domainId, domainOptions, spaceId } from '../store/app';
-import { accessToken } from '../store/auth';
 import AppLayout from '../layouts/AppLayout.vue';
 
+/** 流转明细记录（服务端裸对象） */
+interface LedgerEntry {
+  id: string;
+  kind: string;
+  amount: number;
+  totalDelta: number;
+  reservedDelta: number;
+  consumedDelta: number;
+  reason?: string;
+  occurredAt: string;
+}
+
+/** 占用记录（服务端裸对象） */
+interface Reservation {
+  id: string;
+  resourceId: string;
+  amount: number;
+  status: 'active' | 'released' | 'settled';
+  releasedAmount: number;
+  settledAmount: number;
+  purpose?: string;
+  createdAt: string;
+}
+
 const { Table, Form, Dialog, Drawer, Button, Space, Typography, Descriptions, Tabs, Empty, Dropdown, Select, FloatButton, Icon } = components;
-const { useResources, message, useMediaQuery } = composables;
+const { message, useMediaQuery } = composables;
 
 /** 视窗分支：桌面页头文字按钮 / 手机悬浮圆钮，动作同源（与 AppLayout 同断点直查，响应式自动同步） */
 const isMobile = useMediaQuery('(max-width: 767px)');
 
-const pool = useResources({
-  server: `/spaces/${spaceId.value}`,
-  doc: '/openapi.json',
-  // openapi.json 需鉴权：函数形式保证 token 静默续期后新请求携带新凭据
-  headers: (): Record<string, string> => (accessToken.value ? { Authorization: `Bearer ${accessToken.value}` } : {}),
-  refine: (schema) => {
-    const resources = { ...(schema.resources ?? {}) };
-    delete resources['流转'];
-    return { resources };
-  },
-});
+/** 共享空间池：OpenAPI 文档驱动，含动态资源类型与静态资源（静态名不进类型 Tab） */
+const pool = spacePool();
 
 const activeType = ref<string>('');
 const typeNames = ref<string[]>([]);
 
-watch(() => pool.names, (names) => {
-  typeNames.value = [...names];
-  if (names.length > 0 && !names.includes(activeType.value)) {
-    activeType.value = names[0];
+watch(() => pool.names, (names: string[]) => {
+  const dynamics = names.filter((n: string) => !STATIC_RESOURCE_NAMES.has(n));
+  typeNames.value = dynamics;
+  if (dynamics.length > 0 && !dynamics.includes(activeType.value)) {
+    activeType.value = dynamics[0];
   }
 }, { immediate: true });
 
@@ -115,8 +120,9 @@ async function openUpdate(row: Record<string, unknown>) {
   formMode.value = 'update';
   editingId.value = row.id as string;
   if (client.value) {
-    const env = await client.value.detail(row.id as string) as { data?: Record<string, unknown> };
-    formValues.value = env.data ? { ...env.data } : {};
+    // 裸响应：detail 直接返回资源对象
+    const detail = (await client.value.detail(row.id as string)) as Record<string, unknown>;
+    formValues.value = { ...detail };
   }
   formOpen.value = true;
 }
@@ -155,14 +161,14 @@ async function openDetail(row: Record<string, unknown>) {
 
 /** 动作完成后从服务端重新拉取资源详情与占用/流转列表，避免展示过期快照 */
 async function reloadDetail(resourceId: string) {
-  const [detailEnv, ledger, res] = await Promise.all([
-    client.value?.detail(resourceId) as Promise<{ data?: Record<string, unknown> }> | undefined,
-    listLedger(spaceId.value, resourceId),
-    listReservations(spaceId.value, resourceId),
+  const [detail, ledger, res] = await Promise.all([
+    client.value?.detail(resourceId) as Promise<Record<string, unknown>> | undefined,
+    (await spaceClient('ledger')).list({ pagination: { currentPage: 1, pageSize: 200 }, filters: { resourceId } }),
+    (await spaceClient('reservations')).list({ pagination: { currentPage: 1, pageSize: 200 }, filters: { resourceId } }),
   ]);
-  if (detailEnv?.data) detailRow.value = detailEnv.data;
-  ledgerEntries.value = ledger.list;
-  reservations.value = res.list;
+  if (detail) detailRow.value = detail;
+  ledgerEntries.value = ledger.list as unknown as LedgerEntry[];
+  reservations.value = res.list as unknown as Reservation[];
 }
 
 const detailItems = computed(() => {
@@ -207,18 +213,15 @@ const actionAction = async () => {
   const targetId = actionTarget.value.id as string;
   const amount = Number(actionForm.value.amount);
   const reason = actionForm.value.reason as string | undefined;
+  // 注入/占用/花费 = 创建对应记录资源（名词化端点）
   if (actionKind.value === 'creation') {
-    await createCreation(spaceId.value, { resourceId: targetId, amount, sourceKind: 'manual', reason });
+    await (await spaceClient('creations')).create({ resourceId: targetId, amount, sourceKind: 'manual', reason });
     message.success('注入成功');
   } else if (actionKind.value === 'reservation') {
-    await createReservation(spaceId.value, {
-      resourceId: targetId,
-      amount,
-      purpose: reason,
-    });
+    await (await spaceClient('reservations')).create({ resourceId: targetId, amount, purpose: reason });
     message.success('占用成功');
   } else {
-    await createConsumption(spaceId.value, { resourceId: targetId, amount, sinkKind: 'manual', reason });
+    await (await spaceClient('consumptions')).create({ resourceId: targetId, amount, sinkKind: 'manual', reason });
     message.success('花费已登记');
   }
   actionOpen.value = false;
@@ -245,13 +248,13 @@ const releaseAction = async () => {
   if (!releaseTarget.value) return;
   const amount = Number(releaseForm.value.amount);
   const reason = releaseForm.value.reason as string | undefined;
-  if (releaseMode.value === 'release') {
-    await releaseReservation(spaceId.value, releaseTarget.value.id, { amount, reason });
-    message.success('释放成功');
-  } else {
-    await settleReservation(spaceId.value, releaseTarget.value.id, { amount, reason });
-    message.success('结算成功');
-  }
+  // 释放/结算 = 更新占用记录的状态属性
+  await (await spaceClient('reservations')).update(releaseTarget.value.id, {
+    status: releaseMode.value === 'release' ? 'released' : 'settled',
+    amount,
+    reason,
+  });
+  message.success(releaseMode.value === 'release' ? '释放成功' : '结算成功');
   releaseOpen.value = false;
   refreshTable();
   if (detailOpen.value) await reloadDetail(detailRow.value.id as string);
@@ -288,35 +291,16 @@ function onRowMenuSelect(row: Record<string, unknown>, item: RowMenuItem) {
   }
 }
 
-const reservationColumns = [
-  { key: 'amount', title: '占用量' },
-  { key: 'status', title: '状态', type: 'enum' as const, options: [
-    { label: '有效', value: 'active' },
-    { label: '已释放', value: 'released' },
-    { label: '已结算', value: 'settled' },
-  ]},
-  { key: 'releasedAmount', title: '已释放' },
-  { key: 'settledAmount', title: '已结算' },
-  { key: 'purpose', title: '用途' },
-  { key: 'createdAt', title: '创建时间' },
-  { key: 'actions', title: '操作', width: '160px' },
-];
+/** 详情抽屉内的两张小表同样由文档投影列定义，占用记录额外补充行操作列 */
+const reservationColumns = computed(() => {
+  if (!pool.has('reservations')) return [] as { key: string; title: string }[];
+  return [...pool.client('reservations').columns, { key: 'actions', title: '操作', width: '160px' }];
+});
 
-const ledgerColumns = [
-  { key: 'kind', title: '类型', type: 'enum' as const, options: [
-    { label: '注入', value: 'creation' },
-    { label: '占用', value: 'reservation' },
-    { label: '释放', value: 'release' },
-    { label: '结算', value: 'settle' },
-    { label: '花费', value: 'consumption' },
-  ]},
-  { key: 'amount', title: '数量' },
-  { key: 'totalDelta', title: '总量变化' },
-  { key: 'reservedDelta', title: '占用变化' },
-  { key: 'consumedDelta', title: '消耗变化' },
-  { key: 'reason', title: '说明' },
-  { key: 'occurredAt', title: '时间' },
-];
+const ledgerColumns = computed(() => {
+  if (!pool.has('ledger')) return [] as { key: string; title: string }[];
+  return pool.client('ledger').columns;
+});
 </script>
 
 <template>

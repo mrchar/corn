@@ -64,6 +64,13 @@ export class TemplateService {
     );
   }
 
+  async detail(spaceId: string, templateId: string): Promise<BuiltinTemplateView> {
+    const all = await this.list(spaceId);
+    const target = all.list.find((item) => item.id === templateId);
+    if (!target) throw new AppError(ErrorCodes.NOT_FOUND, '内建模板不存在', { templateId }, 404);
+    return target;
+  }
+
   async setEnabled(spaceId: string, templateId: string, enabled: boolean): Promise<BuiltinTemplateView> {
     await this.requireTemplate(templateId);
     await this.prisma.spaceTemplateSetting.upsert({

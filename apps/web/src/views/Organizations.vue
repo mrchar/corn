@@ -1,17 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { components, composables } from '@mrchar/cumquat';
-import {
-  createDomain,
-  createGroup,
-  createSpace,
-  deleteDomain,
-  deleteGroup,
-  listGroups,
-  updateDomain,
-  updateGroup,
-  updateSpace,
-} from '../api';
+import { rootClient, rootPool, spaceClient, spacePool } from '../services/pools';
 import { dataVersion, domains, domainEnabled, groupEnabled, reloadDomains, reloadSpaces, saveUserPrefs, spaceId, spaces, userPrefs } from '../store/app';
 import AppLayout from '../layouts/AppLayout.vue';
 
@@ -78,28 +68,28 @@ const parentOptions = computed(() => {
 });
 
 async function reloadGroups() {
-  const res = await listGroups(spaceId.value);
-  groups.value = res.list;
+  const res = await (await spaceClient('groups')).list({ pagination: { currentPage: 1, pageSize: 200 } });
+  groups.value = res.list as unknown as MetaRow[];
   tableKey.value++;
 }
 
 watch(spaceId, () => reloadGroups(), { immediate: true });
 watch(dataVersion, () => reloadGroups()); // 智能体等渠道写库后自动重拉群组
 
-const metaColumns = [
-  { key: 'code', title: '编码' },
-  { key: 'name', title: '名称' },
-  { key: 'actions', title: '操作', width: '150px' },
-];
+/** 列表列由 OpenAPI 文档投影生成，仅补充行操作列 */
+const root = rootPool();
+const space = spacePool();
+
+const domainColumns = computed(() => {
+  if (!space.has('domains')) return [] as { key: string; title: string }[];
+  return [...space.client('domains').columns, { key: 'actions', title: '操作', width: '150px' }];
+});
 
 /** 空间表：附两个空间级配置开关列（每个空间分别配置，开关落在卡片底部） */
-const spaceColumns = [
-  { key: 'code', title: '编码' },
-  { key: 'name', title: '名称' },
-  { key: 'enableDomain', title: '使用领域', width: '110px' },
-  { key: 'enableGroup', title: '使用群组', width: '110px' },
-  { key: 'actions', title: '操作', width: '150px' },
-];
+const spaceColumns = computed(() => {
+  if (!root.has('spaces')) return [] as { key: string; title: string }[];
+  return [...root.client('spaces').columns, { key: 'actions', title: '操作', width: '150px' }];
+});
 
 /* ---------- 弹窗状态：新建/编辑共用 ---------- */
 
@@ -121,32 +111,35 @@ const formAction = async () => {
   if (!name) throw new Error('请输入名称');
 
   if (activeSection.value === 'space') {
+    const client = await rootClient('spaces');
     if (formMode.value === 'create') {
       const code = form.value.code.trim();
       if (!codeRule.test(code)) throw new Error('编码需以小写字母开头，仅含小写字母、数字与连字符');
-      await createSpace({ code, name });
+      await client.create({ code, name });
       message.success('空间已创建');
     } else {
-      await updateSpace(editingId.value, { name });
+      await client.update(editingId.value, { name });
       message.success('空间已更新');
     }
     await reloadSpaces();
   } else if (activeSection.value === 'domain') {
+    const client = await spaceClient('domains');
     if (formMode.value === 'create') {
       const code = form.value.code.trim();
       if (!codeRule.test(code)) throw new Error('编码需以小写字母开头，仅含小写字母、数字与连字符');
-      await createDomain(spaceId.value, { code, name });
+      await client.create({ code, name });
       message.success('领域已创建');
     } else {
-      await updateDomain(spaceId.value, editingId.value, name);
+      await client.update(editingId.value, { name });
       message.success('领域已更新');
     }
     await reloadDomains();
   } else {
+    const client = await spaceClient('groups');
     if (formMode.value === 'create') {
       const code = form.value.code.trim();
       if (!codeRule.test(code)) throw new Error('编码需以小写字母开头，仅含小写字母、数字与连字符');
-      await createGroup(spaceId.value, {
+      await client.create({
         code,
         name,
         ...(form.value.parentId ? { parentId: form.value.parentId } : {}),
@@ -154,7 +147,7 @@ const formAction = async () => {
       message.success('群组已创建');
     } else {
       // 空串 = 移回顶级；后端负责防环校验（自身/后代不可为上级）
-      await updateGroup(spaceId.value, editingId.value, {
+      await client.update(editingId.value, {
         name,
         parentId: form.value.parentId || null,
       });
@@ -186,11 +179,11 @@ function openRemove(section: Section, row: MetaRow) {
 
 const removeAction = async () => {
   if (removeSection.value === 'domain') {
-    await deleteDomain(spaceId.value, removeRow.value.id);
+    await (await spaceClient('domains')).remove(removeRow.value.id);
     message.success('领域已删除');
     await reloadDomains();
   } else {
-    await deleteGroup(spaceId.value, removeRow.value.id);
+    await (await spaceClient('groups')).remove(removeRow.value.id);
     message.success('群组已删除');
     await reloadGroups();
   }
@@ -220,7 +213,7 @@ const groupSwitchDisabled = computed(() => groups.value.length > 1);
 /** 空间卡片上的开关：受控绑定（失败不落库自动回弹），当前空间的计数约束前端预禁用，其余空间由服务端 409 把关 */
 async function setSpaceFlag(row: SpaceRow, flag: 'enableDomain' | 'enableGroup', val: boolean) {
   try {
-    await updateSpace(row.id, { [flag]: val });
+    await (await rootClient('spaces')).update(row.id, { [flag]: val });
     await reloadSpaces();
     tableKey.value++;
     message.success(
@@ -309,7 +302,7 @@ function onPrimarySelect(key: string) {
           <Icon><path d="M12 5v14M5 12h14" /></Icon> 新建领域
         </Button>
       </div>
-      <Table :key="`dm-${tableKey}`" :columns="metaColumns" :fetch="domainsFetch" responsive card-breakpoint="767px">
+      <Table :key="`dm-${tableKey}`" :columns="domainColumns" :fetch="domainsFetch" responsive card-breakpoint="767px">
         <template #cell-actions="{ row }">
           <Space>
             <Button size="sm" style="white-space: nowrap; flex-shrink: 0" @click="openForm('update', 'domain', row as unknown as MetaRow)">编辑</Button>

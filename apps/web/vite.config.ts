@@ -6,8 +6,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // 注册登录与令牌续期
-      '/auth': {
+      // 会话（登录/续期/登出）
+      '/sessions': {
         target: 'http://localhost:4000',
         changeOrigin: true,
       },
@@ -15,8 +15,13 @@ export default defineConfig({
         target: 'http://localhost:4000',
         changeOrigin: true,
       },
-      // 当前用户信息与用户级组织开关
+      // 用户（注册 = POST /users，当前用户 = /users/:id）
       '/users': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+      },
+      // 全局 OpenAPI 文档（rootPool 元数据）
+      '/openapi.json': {
         target: 'http://localhost:4000',
         changeOrigin: true,
       },

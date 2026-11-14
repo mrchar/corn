@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { components } from '@mrchar/cumquat';
-import { createSpace } from './api';
+import { rootClient } from './services/pools';
 import { currentView, initApp, reloadSpaces, spaceId } from './store/app';
 import { isAuthed, loadAuth } from './store/auth';
 import Login from './views/Login.vue';
@@ -58,7 +58,7 @@ async function submitCreate() {
   }
   creating.value = true;
   try {
-    await createSpace({ code, name: createForm.value.name.trim() });
+    await (await rootClient('spaces')).create({ code, name: createForm.value.name.trim() });
     createOpen.value = false;
     await reloadSpaces();
   } catch (e) {

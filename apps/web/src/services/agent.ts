@@ -1,35 +1,17 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { tool, stepCountIs, streamText, type ModelMessage, type ToolSet } from 'ai';
 import { composables } from '@mrchar/cumquat';
-import { useResources } from '@mrchar/cumquat/composables';
 import { z } from 'zod';
 import { computed, ref } from 'vue';
-import {
-  createConsumption,
-  createCreation,
-  createDomain,
-  createGroup,
-  createReservation,
-  createResourceType,
-  deleteDomain,
-  deleteGroup,
-  listGroups,
-  listLedger,
-  listReservations,
-  listResourceTypes,
-  releaseReservation,
-  settleReservation,
-  updateDomain,
-  updateGroup,
-  updateResourceType,
-  type Domain,
-  type Group,
-  type LedgerEntry,
-  type Reservation,
-  type ResourceType,
-} from '../api';
+import { poolReady, reloadSpacePoolDoc, spaceClient, spacePool } from './pools';
 import { currentView, dataVersion, domainId, domains, spaceId, spaces } from '../store/app';
 import { accessToken } from '../store/auth';
+
+/** 服务端裸对象的最小类型（仅工具执行消费字段） */
+interface ResourceTypeRow { id: string; code: string; name: string; status: string; domainName?: string; resourceCount?: number }
+interface GroupRow { id: string; code: string; name: string; parentId?: string | null }
+interface ReservationRow { id: string; amount: number; status: string; purpose?: string; createdAt?: string }
+interface LedgerEntryRow { kind: string; totalDelta: number; reservedDelta: number; consumedDelta: number; reason?: string; occurredAt?: string }
 
 /**
  * 前端智能体（单文件三层）：契约层（工具 schema / 系统提示 / 工具集）、
@@ -96,33 +78,14 @@ interface ExecuteInput {
   description?: string;
 }
 
-/** 资源池单例：跨工具调用复用已加载的元数据，空间或登录凭据变化时重建 */
-let cachedPool: ReturnType<typeof useResources> | null = null;
-let cachedSpace = '';
-let cachedToken = '';
-
 /**
- * 获取就绪的资源池：元数据（openapi）异步加载，names/has 是同步读取——
- * 未就绪时 names 为空、has 恒 false，必须等待 status 变化后再读；
- * client() 的方法内部自等待，不受此影响。
+ * 获取就绪的空间资源池（services/pools.ts 共享单例，随空间切换自动重建）。
+ * names/has 是同步读取——元数据未就绪时为空，必须先等 poolReady。
  */
 async function currentPool() {
-  if (!cachedPool || cachedSpace !== spaceId.value || cachedToken !== accessToken.value) {
-    cachedPool = useResources({
-      server: `/spaces/${spaceId.value}`,
-      doc: '/openapi.json',
-      headers: { Authorization: `Bearer ${accessToken.value}` },
-    });
-    cachedSpace = spaceId.value;
-    cachedToken = accessToken.value;
-  }
-  for (let i = 0; i < 100 && cachedPool.state.status === 'pending'; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  if (cachedPool.state.status === 'error') {
-    throw cachedPool.state.error ?? new Error('资源池元数据加载失败');
-  }
-  return cachedPool;
+  const pool = spacePool();
+  await poolReady(pool);
+  return pool;
 }
 
 /** 归一化列表返回：数组 / { list, total } / 单值三形态 → { list, total } */
@@ -137,7 +100,7 @@ function toList<T>(result: unknown): { list: T[]; total: number } {
 
 /** 按名称定位资源实例：精确匹配优先，其次包含关系 */
 async function findResource(
-  pool: ReturnType<typeof useResources>,
+  pool: Awaited<ReturnType<typeof currentPool>>,
   typeName: string,
   keyword: string,
 ): Promise<{ id: string; name: string } | null> {
@@ -154,12 +117,11 @@ type QueryInput = { target?: string; typeName?: string; resourceName?: string; k
 const QUERY_HANDLERS: Record<string, (input: QueryInput) => Promise<ToolOutput>> = {
   /** 资源类型清单与计数（含停用，模型可感知状态） */
   async resource_types(input) {
-    const res = await listResourceTypes(spaceId.value, {
+    const res = await (await spaceClient('resource-types')).list({
+      pagination: { currentPage: 1, pageSize: 20 },
       keyword: input.keyword?.trim() || undefined,
-      page: 1,
-      pageSize: 20,
     });
-    const rows = res.list.map((t: ResourceType) => ({
+    const rows = (res.list as unknown as ResourceTypeRow[]).map((t) => ({
       id: t.id,
       code: t.code,
       name: t.name,
@@ -195,7 +157,7 @@ const QUERY_HANDLERS: Record<string, (input: QueryInput) => Promise<ToolOutput>>
   /** 领域清单（store 同源，随切换即时更新） */
   async domains(input) {
     const kw = input.keyword?.trim();
-    const rows: Array<Pick<Domain, 'id' | 'name'>> = domains.value
+    const rows = domains.value
       .filter((d) => !kw || d.name.includes(kw))
       .map((d) => ({ id: d.id, name: d.name }));
     return { ok: true, text: JSON.stringify({ domains: rows, total: rows.length }) };
@@ -203,11 +165,11 @@ const QUERY_HANDLERS: Record<string, (input: QueryInput) => Promise<ToolOutput>>
 
   /** 群组清单（平表含 parentId，模型据此理解嵌套） */
   async groups(input) {
-    const res = await listGroups(spaceId.value);
+    const res = await (await spaceClient('groups')).list({ pagination: { currentPage: 1, pageSize: 200 } });
     const kw = input.keyword?.trim();
-    const rows = res.list
-      .filter((g: Group) => !kw || g.name.includes(kw) || g.code.includes(kw))
-      .map((g: Group) => ({ id: g.id, name: g.name, code: g.code, parentId: g.parentId }));
+    const rows = (res.list as unknown as GroupRow[])
+      .filter((g) => !kw || g.name.includes(kw) || g.code.includes(kw))
+      .map((g) => ({ id: g.id, name: g.name, code: g.code, parentId: g.parentId }));
     return { ok: true, text: JSON.stringify({ groups: rows, total: rows.length }) };
   },
 
@@ -216,8 +178,11 @@ const QUERY_HANDLERS: Record<string, (input: QueryInput) => Promise<ToolOutput>>
     const pool = await currentPool();
     const target = await locateResource(pool, input);
     if (!target) return { ok: false, text: locateFailureText(input) };
-    const res = await listReservations(spaceId.value, target.id, 1, 20);
-    const rows = res.list.map((r: Reservation) => ({
+    const res = await (await spaceClient('reservations')).list({
+      pagination: { currentPage: 1, pageSize: 20 },
+      filters: { resourceId: target.id },
+    });
+    const rows = (res.list as unknown as ReservationRow[]).map((r) => ({
       id: r.id,
       amount: r.amount,
       status: r.status,
@@ -232,14 +197,17 @@ const QUERY_HANDLERS: Record<string, (input: QueryInput) => Promise<ToolOutput>>
     const pool = await currentPool();
     const target = await locateResource(pool, input);
     if (!target) return { ok: false, text: locateFailureText(input) };
-    const res = await listLedger(spaceId.value, target.id, 1, 20);
-    const rows = res.list.map((e: LedgerEntry) => ({
+    const res = await (await spaceClient('ledger')).list({
+      pagination: { currentPage: 1, pageSize: 20 },
+      filters: { resourceId: target.id },
+    });
+    const rows = (res.list as unknown as LedgerEntryRow[]).map((e) => ({
       kind: e.kind,
       totalDelta: e.totalDelta,
       reservedDelta: e.reservedDelta,
       consumedDelta: e.consumedDelta,
       reason: e.reason,
-      createdAt: e.createdAt,
+      occurredAt: e.occurredAt,
     }));
     return { ok: true, text: JSON.stringify({ resource: target.name, entries: rows, total: res.total }) };
   },
@@ -247,7 +215,7 @@ const QUERY_HANDLERS: Record<string, (input: QueryInput) => Promise<ToolOutput>>
 
 /** 流转/记录类查询的公共前置：定位资源实例 */
 async function locateResource(
-  pool: ReturnType<typeof useResources>,
+  pool: Awaited<ReturnType<typeof currentPool>>,
   input: QueryInput,
 ): Promise<{ id: string; name: string } | null> {
   if (!input.typeName || !input.resourceName) return null;
@@ -306,26 +274,31 @@ async function executeResource(input: ExecuteInput): Promise<ToolOutput> {
 
   switch (action as FlowAction) {
     case 'inject':
-      await createCreation(spaceId.value, { resourceId: target.id, amount, sourceKind: 'manual', reason });
+      await (await spaceClient('creations')).create({ resourceId: target.id, amount, sourceKind: 'manual', reason });
       return { ok: true, text: `已向资源「${target.name}」注入 ${amount}` };
     case 'reserve':
-      await createReservation(spaceId.value, { resourceId: target.id, amount, purpose: reason });
+      await (await spaceClient('reservations')).create({ resourceId: target.id, amount, purpose: reason });
       return { ok: true, text: `已占用资源「${target.name}」${amount}` };
     case 'consume':
-      await createConsumption(spaceId.value, { resourceId: target.id, amount, sinkKind: 'manual', reason });
+      await (await spaceClient('consumptions')).create({ resourceId: target.id, amount, sinkKind: 'manual', reason });
       return { ok: true, text: `已花费资源「${target.name}」${amount}` };
     case 'release':
     case 'settle': {
-      // 释放/结算作用于该资源最近的活跃占用
-      const res = await listReservations(spaceId.value, target.id, 1, 20);
-      const active = res.list.find((r) => r.status === 'active');
+      // 释放/结算 = 更新占用记录的状态属性，作用于该资源最近的活跃占用
+      const res = await (await spaceClient('reservations')).list({
+        pagination: { currentPage: 1, pageSize: 20 },
+        filters: { resourceId: target.id },
+      });
+      const active = (res.list as unknown as ReservationRow[]).find((r) => r.status === 'active');
       if (!active) return { ok: false, text: `资源「${target.name}」没有进行中的占用` };
-      if (action === 'release') {
-        await releaseReservation(spaceId.value, active.id, { amount, reason });
-        return { ok: true, text: `已释放资源「${target.name}」的占用 ${amount}` };
-      }
-      await settleReservation(spaceId.value, active.id, { amount, reason });
-      return { ok: true, text: `已将资源「${target.name}」的占用结算为花费 ${amount}` };
+      await (await spaceClient('reservations')).update(active.id, {
+        status: action === 'release' ? 'released' : 'settled',
+        amount,
+        reason,
+      });
+      return action === 'release'
+        ? { ok: true, text: `已释放资源「${target.name}」的占用 ${amount}` }
+        : { ok: true, text: `已将资源「${target.name}」的占用结算为花费 ${amount}` };
     }
     default:
       return { ok: false, text: `未支持的操作：${action}` };
@@ -340,24 +313,25 @@ async function executeResourceType(input: ExecuteInput): Promise<ToolOutput> {
     if (!unit) return { ok: false, text: '缺少计量单位（unit）' };
     const domId = domIdInput || domainId.value || domains.value[0]?.id;
     if (!domId) return { ok: false, text: '缺少所属领域（domainId），当前空间也没有可用领域' };
-    const created = await createResourceType(spaceId.value, { code, name, unit, domainId: domId, description });
-    return { ok: true, text: `已创建资源类型「${created.data?.name ?? name}」（编码 ${code}）` };
+    const created = (await (await spaceClient('resource-types')).create({ code, name, unit, domainId: domId, description })) as { name?: string };
+    return { ok: true, text: `已创建资源类型「${created?.name ?? name}」（编码 ${code}）` };
   }
   /** 宽容解析：id/code/name 任一命中（模型常以 code 或 name 指称对象，不强迫先 query 换 uuid） */
   const key = id ?? code ?? name;
   if (!key) return { ok: false, text: '缺少目标标识（id/code/name 任一，可先 query resource_types 获取）' };
-  const target = (await listResourceTypes(spaceId.value, { page: 1, pageSize: 100 })).list.find(
-    (t: ResourceType) => t.id === key || t.code === key || t.name === key,
+  const typeRes = await (await spaceClient('resource-types')).list({ pagination: { currentPage: 1, pageSize: 100 } });
+  const target = (typeRes.list as unknown as ResourceTypeRow[]).find(
+    (t) => t.id === key || t.code === key || t.name === key,
   );
   if (!target) return { ok: false, text: `未找到资源类型「${String(key)}」（id/code/name 均不匹配，可先 query 核对）` };
   if (action === 'rename') {
     if (!name) return { ok: false, text: '缺少新名称（name）' };
-    await updateResourceType(spaceId.value, target.id, { name });
+    await (await spaceClient('resource-types')).update(target.id, { name });
     return { ok: true, text: '已更新资源类型名称' };
   }
   if (action === 'disable' || action === 'enable') {
     const status = action === 'disable' ? 'disabled' : 'active';
-    await updateResourceType(spaceId.value, target.id, { status });
+    await (await spaceClient('resource-types')).update(target.id, { status });
     return { ok: true, text: action === 'disable' ? '已停用该资源类型' : '已启用该资源类型' };
   }
   return { ok: false, text: `资源类型不支持操作：${String(action)}` };
@@ -368,7 +342,7 @@ async function executeDomain(input: ExecuteInput): Promise<ToolOutput> {
   if (action === 'create') {
     if (!code) return { ok: false, text: '缺少领域编码（code）：小写字母开头，仅含小写字母、数字、连字符' };
     if (!name) return { ok: false, text: '缺少领域名称（name）' };
-    await createDomain(spaceId.value, { code, name });
+    await (await spaceClient('domains')).create({ code, name });
     return { ok: true, text: `已创建领域「${name}」` };
   }
   /** 宽容解析：id/name 任一命中（Domain 类型无对外 code 字段） */
@@ -378,11 +352,11 @@ async function executeDomain(input: ExecuteInput): Promise<ToolOutput> {
   if (!target) return { ok: false, text: `未找到领域「${String(key)}」（id/name 均不匹配，可先 query 核对）` };
   if (action === 'rename') {
     if (!name) return { ok: false, text: '缺少新名称（name）' };
-    await updateDomain(spaceId.value, target.id, name);
+    await (await spaceClient('domains')).update(target.id, { name });
     return { ok: true, text: '已更新领域名称' };
   }
   if (action === 'delete') {
-    await deleteDomain(spaceId.value, target.id);
+    await (await spaceClient('domains')).remove(target.id);
     return { ok: true, text: '已删除该领域（其下类型与资源已级联清理）' };
   }
   return { ok: false, text: `领域不支持操作：${String(action)}` };
@@ -393,26 +367,27 @@ async function executeGroup(input: ExecuteInput): Promise<ToolOutput> {
   if (action === 'create') {
     if (!code) return { ok: false, text: '缺少群组编码（code）：小写字母开头，仅含小写字母、数字、连字符' };
     if (!name) return { ok: false, text: '缺少群组名称（name）' };
-    await createGroup(spaceId.value, { code, name, parentId: parentId || undefined });
+    await (await spaceClient('groups')).create({ code, name, parentId: parentId || undefined });
     return { ok: true, text: parentId ? '已在该上级群组下创建群组' : '已创建顶级群组' };
   }
   if (!id && !code && !name) return { ok: false, text: '缺少目标标识（id/code/name 任一，可先 query groups 获取）' };
   const gkey = id ?? code ?? name;
-  const gtarget = (await listGroups(spaceId.value)).list.find(
-    (g: Group) => g.id === gkey || g.code === gkey || g.name === gkey,
+  const gRes = await (await spaceClient('groups')).list({ pagination: { currentPage: 1, pageSize: 200 } });
+  const gtarget = (gRes.list as unknown as GroupRow[]).find(
+    (g) => g.id === gkey || g.code === gkey || g.name === gkey,
   );
   if (!gtarget) return { ok: false, text: `未找到群组「${String(gkey)}」（id/code/name 均不匹配，可先 query 核对）` };
   if (action === 'rename') {
     if (!name) return { ok: false, text: '缺少新名称（name）' };
-    await updateGroup(spaceId.value, gtarget.id, { name });
+    await (await spaceClient('groups')).update(gtarget.id, { name });
     return { ok: true, text: '已更新群组名称' };
   }
   if (action === 'move') {
-    await updateGroup(spaceId.value, gtarget.id, { parentId: parentId || null });
+    await (await spaceClient('groups')).update(gtarget.id, { parentId: parentId || null });
     return { ok: true, text: parentId ? '已移动该群组到新的上级' : '已将该群组提升为顶级群组' };
   }
   if (action === 'delete') {
-    await deleteGroup(spaceId.value, gtarget.id);
+    await (await spaceClient('groups')).remove(gtarget.id);
     return { ok: true, text: '已删除该群组（子群组已提升为顶级）' };
   }
   return { ok: false, text: `群组不支持操作：${String(action)}` };
@@ -436,12 +411,12 @@ async function resolveTargetLabel(target: string, id?: string, code?: string, na
     list.find((t) => t.id === key || (t.code && t.code === key) || t.name === key);
   if (target === 'domain') return domains.value.find((d) => d.id === key || d.name === key)?.name ?? key;
   if (target === 'group') {
-    const res = await listGroups(spaceId.value);
-    return match(res.list)?.name ?? key;
+    const res = await (await spaceClient('groups')).list({ pagination: { currentPage: 1, pageSize: 200 } });
+    return match(res.list as Array<{ id: string; name: string; code?: string }>)?.name ?? key;
   }
   if (target === 'resource_type') {
-    const res = await listResourceTypes(spaceId.value, { page: 1, pageSize: 100 });
-    return match(res.list)?.name ?? key;
+    const res = await (await spaceClient('resource-types')).list({ pagination: { currentPage: 1, pageSize: 100 } });
+    return match(res.list as Array<{ id: string; name: string; code?: string }>)?.name ?? key;
   }
   return key;
 }
@@ -506,7 +481,11 @@ export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
       const handler = target ? EXECUTE_HANDLERS[target] : undefined;
       if (!handler) return { ok: false, text: `未知操作目标：${String(target)}（支持：${Object.keys(EXECUTE_HANDLERS).join('/')}）` };
       const output = await safe(() => handler(input as ExecuteInput));
-      if (output.ok) dataVersion.value++; // 写库成功后递增全局版本号，驱动受影响视图自动刷新
+      if (output.ok) {
+        dataVersion.value++; // 写库成功后递增全局版本号，驱动受影响视图自动刷新
+        // 资源类型写操作改变动态资源集合，须重拉空间池元数据（Tab/表单字段来源）
+        if (target === 'resource_type') reloadSpacePoolDoc();
+      }
       return output;
     },
   },

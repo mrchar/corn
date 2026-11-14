@@ -2,11 +2,16 @@ import { Injectable } from '@nestjs/common';
 import { AttributeDef } from '../../common/attribute';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ResourceTypeService } from '../resource-type/resource-type.service';
+import { baseDocument } from './base-document';
+
+type Json = Record<string, unknown>;
 
 /**
- * 按空间动态生成 OpenAPI 3.0.3 文档。
- * 每个资源类型对应一组 REST 路径 + 一个 tag，tag 名为类型名称，路径段用类型编码。
- * 前端组件库据此自动派生列表列、表单字段与操作。
+ * 空间级 OpenAPI 文档 = 注解生成的基础文档（SwaggerModule 产出）按空间裁剪
+ * + 数据库元数据描述的用户自定义资源类型。
+ *
+ * 前者不手写：控制器/数据模型的注解即文档；后者只能在运行期由元数据派生，
+ * 因此仍以 JSON 结构拼装（且统一挂在同一套 REST 约定下）。
  */
 @Injectable()
 export class MetadataService {
@@ -16,128 +21,133 @@ export class MetadataService {
   ) {}
 
   async generate(spaceId: string): Promise<Record<string, unknown>> {
-    const space = await this.prisma.space.findUnique({ where: { id: spaceId } });
-    if (!space) return this.emptyDoc(spaceId);
+    const base = this.cloneBase();
+    const prefix = `/spaces/${spaceId}`;
+    const sourcePaths = (base.paths ?? {}) as Record<string, Json>;
+    const paths: Record<string, Json> = {};
+    const schemas: Record<string, Json> = { ...(base.componentsSchemas ?? {}) };
+    const tags: Json[] = [...((base.tags as Json[] | undefined) ?? [])];
 
-    const { list: typeList } = await this.types.list(spaceId, { pageSize: 200 });
-    const paths: Record<string, unknown> = {};
-    const schemas: Record<string, unknown> = {};
-    const tags: { name: string; description: string }[] = [];
-
-    for (const type of typeList) {
-      if (type.status !== 'active') continue;
-      const code = type.code;
-      tags.push({ name: type.name, description: type.description || `${type.name}（${code}）` });
-
-      const requestSchema = this.buildRequestSchema(type);
-      const responseSchema = this.buildResponseSchema(type);
-      const listSchema = {
-        type: 'object',
-        properties: {
-          list: { type: 'array', items: { $ref: `#/components/schemas/${code}_Resource` } },
-          total: { type: 'integer' },
-        },
-      };
-
-      schemas[`${code}_CreateBody`] = requestSchema;
-      schemas[`${code}_Resource`] = responseSchema;
-      schemas[`${code}_List`] = listSchema;
-
-      paths[`/${code}`] = {
-        get: {
-          tags: [type.name],
-          summary: `查询${type.name}列表`,
-          parameters: this.listParameters(type),
-          responses: {
-            '200': {
-              description: '查询成功',
-              content: { 'application/json': { schema: { $ref: `#/components/schemas/${code}_List` } } },
-            },
-          },
-        },
-        post: {
-          tags: [type.name],
-          summary: `创建${type.name}`,
-          requestBody: {
-            required: true,
-            content: { 'application/json': { schema: { $ref: `#/components/schemas/${code}_CreateBody` } } },
-          },
-          responses: {
-            '200': {
-              description: '创建成功',
-              content: { 'application/json': { schema: this.actionResultSchema(responseSchema) } },
-            },
-          },
-        },
-      };
-
-      paths[`/${code}/{id}`] = {
-        get: {
-          tags: [type.name],
-          summary: `查询${type.name}详情`,
-          parameters: [this.idParameter()],
-          responses: {
-            '200': {
-              description: '查询成功',
-              content: { 'application/json': { schema: this.actionResultSchema(responseSchema) } },
-            },
-          },
-        },
-        patch: {
-          tags: [type.name],
-          summary: `更新${type.name}`,
-          parameters: [this.idParameter()],
-          requestBody: {
-            content: { 'application/json': { schema: { $ref: `#/components/schemas/${code}_CreateBody` } } },
-          },
-          responses: {
-            '200': {
-              description: '更新成功',
-              content: { 'application/json': { schema: this.actionResultSchema(responseSchema) } },
-            },
-          },
-        },
-        delete: {
-          tags: [type.name],
-          summary: `归档${type.name}`,
-          parameters: [this.idParameter()],
-          responses: {
-            '200': {
-              description: '归档成功',
-              content: { 'application/json': { schema: this.actionResultSchema(responseSchema) } },
-            },
-          },
-        },
-      };
+    /* 基础文档中的空间级静态资源路径：/spaces/{spaceId}/xxx → /spaces/{实际空间}/xxx */
+    for (const [path, item] of Object.entries(sourcePaths)) {
+      if (!path.startsWith('/spaces/{spaceId}/')) continue;
+      const tail = path.slice('/spaces/{spaceId}'.length);
+      if (tail.startsWith('/{typeCode}') || tail === '/openapi.json') continue;
+      paths[prefix + tail] = item;
     }
 
-    this.appendActionPaths(paths, schemas);
+    const space = await this.prisma.space.findUnique({ where: { id: spaceId } });
+
+    /* 动态资源类型：元数据 → 路径/模型/tag */
+    if (space) {
+      const { list } = await this.types.list(spaceId, { pageSize: 200 });
+      for (const type of list) {
+        if (type.status !== 'active') continue;
+        const code = type.code;
+        this.appendDynamic(paths, schemas, tags, prefix, type);
+      }
+    }
 
     return {
-      openapi: '3.0.3',
-      info: {
-        title: `资源管理云服务 · ${space.name}`,
-        version: '0.1.0',
-        description: '由系统按空间当前可用资源类型动态生成。',
-      },
-      servers: [{ url: `/spaces/${spaceId}` }],
+      ...base,
+      info: { ...(base.info as Json), title: `资源管理云服务 · ${space?.name ?? spaceId}` },
+      servers: [{ url: '/' }],
       tags,
       paths,
-      components: { schemas },
+      components: { ...(base.components as Json), schemas },
     };
   }
 
-  private emptyDoc(spaceId: string) {
+  /** 全局文档：顶层资源（spaces/users/sessions），直接取自注解文档的对应路径。 */
+  generateGlobal(): Record<string, unknown> {
+    const base = this.cloneBase();
+    const allow = new Set(['/spaces', '/spaces/{spaceId}', '/users', '/users/{id}', '/sessions', '/sessions/{id}']);
+    const paths = Object.fromEntries(
+      Object.entries((base.paths ?? {}) as Record<string, Json>).filter(([path]) => allow.has(path)),
+    );
     return {
-      openapi: '3.0.3',
-      info: { title: `资源管理云服务 · ${spaceId}`, version: '0.1.0' },
-      servers: [{ url: `/spaces/${spaceId}` }],
-      paths: {},
-      components: { schemas: {} },
+      ...base,
+      info: { ...(base.info as Json), title: '资源管理云服务 · 全局' },
+      servers: [{ url: '/' }],
+      paths,
     };
   }
 
-  private buildRequestSchema(type: { name: string; attrSchema: AttributeDef[] }) {
+  /** 深拷贝基础文档，避免调用方改写缓存；components.schemas 拍平到组件层内部使用 */
+  private cloneBase(): Json & { componentsSchemas: Record<string, Json> } {
+    const cloned = JSON.parse(JSON.stringify(baseDocument())) as Json;
+    const components = (cloned.components ?? {}) as Json;
+    return { ...cloned, componentsSchemas: (components.schemas ?? {}) as Record<string, Json> };
+  }
+
+  /** 单个资源类型的一组 REST 路径（集合/单项），tag 中文名即前端资源名 */
+  private appendDynamic(
+    paths: Record<string, Json>,
+    schemas: Record<string, Json>,
+    tags: Json[],
+    prefix: string,
+    type: { code: string; name: string; description: string; unit: string; attrSchema: AttributeDef[] },
+  ) {
+    const code = type.code;
+    tags.push({ name: type.name, description: type.description || `${type.name}（${code}）` });
+
+    const requestSchema = this.buildRequestSchema(type);
+    const responseSchema = this.buildResponseSchema(type);
+    const listSchema = this.buildListSchema(type);
+    schemas[`${code}_CreateBody`] = requestSchema;
+    schemas[`${code}_Resource`] = responseSchema;
+    schemas[`${code}_ListItem`] = listSchema;
+    schemas[`${code}_List`] = {
+      type: 'object',
+      properties: {
+        list: { type: 'array', items: { $ref: `#/components/schemas/${code}_ListItem` } },
+        total: { type: 'integer' },
+      },
+    };
+
+    const resourceRef = { $ref: `#/components/schemas/${code}_Resource` };
+    const bodyRef = { $ref: `#/components/schemas/${code}_CreateBody` };
+    const ok = (schema: unknown) => ({ description: '成功', content: { 'application/json': { schema } } });
+
+    paths[`${prefix}/${code}`] = {
+      get: {
+        tags: [type.name],
+        summary: `查询${type.name}列表`,
+        parameters: this.listParameters(type),
+        responses: { '200': ok({ $ref: `#/components/schemas/${code}_List` }) },
+      },
+      post: {
+        tags: [type.name],
+        summary: `创建${type.name}`,
+        requestBody: { required: true, content: { 'application/json': { schema: bodyRef } } },
+        responses: { '200': ok(resourceRef) },
+      },
+    };
+
+    paths[`${prefix}/${code}/{id}`] = {
+      get: {
+        tags: [type.name],
+        summary: `查询${type.name}详情`,
+        parameters: [this.idParameter()],
+        responses: { '200': ok(resourceRef) },
+      },
+      patch: {
+        tags: [type.name],
+        summary: `更新${type.name}`,
+        parameters: [this.idParameter()],
+        requestBody: { content: { 'application/json': { schema: bodyRef } } },
+        responses: { '200': ok(resourceRef) },
+      },
+      delete: {
+        tags: [type.name],
+        summary: `归档${type.name}`,
+        parameters: [this.idParameter()],
+        responses: { '200': ok(resourceRef) },
+      },
+    };
+  }
+
+  private buildRequestSchema(type: { attrSchema: AttributeDef[] }) {
     const props: Record<string, unknown> = {
       domainId: { type: 'string', description: '归属领域 ID' },
       name: { type: 'string', description: '资源名称' },
@@ -151,7 +161,26 @@ export class MetadataService {
     return { type: 'object', properties: props, required };
   }
 
-  private buildResponseSchema(type: { code: string; name: string; unit: string; attrSchema: AttributeDef[] }) {
+  /** 列表项投影：仅声明列表展示字段（运行时仍返回完整对象），前端列定义由此生成 */
+  private buildListSchema(type: { attrSchema: AttributeDef[] }) {
+    const props: Record<string, unknown> = {
+      name: { type: 'string', description: '资源名称' },
+      typeName: { type: 'string', description: '类型名称', readOnly: true },
+      unit: { type: 'string', description: '计量单位', readOnly: true },
+      domainName: { type: 'string', description: '归属领域名称', readOnly: true },
+      status: { type: 'string', enum: ['active', 'archived'], description: '状态' },
+      total: { type: 'number', description: '总量', readOnly: true },
+      reserved: { type: 'number', description: '已占用', readOnly: true },
+      consumed: { type: 'number', description: '已消耗', readOnly: true },
+      available: { type: 'number', description: '可用量', readOnly: true },
+    };
+    for (const def of type.attrSchema) {
+      props[def.key] = this.attrToSchema(def);
+    }
+    return { type: 'object', properties: props };
+  }
+
+  private buildResponseSchema(type: { attrSchema: AttributeDef[] }) {
     const props: Record<string, unknown> = {
       id: { type: 'string', description: 'ID', readOnly: true },
       name: { type: 'string', description: '资源名称' },
@@ -210,122 +239,5 @@ export class MetadataService {
 
   private idParameter() {
     return { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: '资源 ID' };
-  }
-
-  private actionResultSchema(dataSchema: Record<string, unknown>) {
-    return {
-      type: 'object',
-      properties: {
-        status: { type: 'string', enum: ['success', 'error'] },
-        message: { type: 'string' },
-        data: dataSchema,
-      },
-    };
-  }
-
-  /** 动作型端点：创建 / 占用 / 释放 / 结算 / 花费 / 流转明细。 */
-  private appendActionPaths(paths: Record<string, unknown>, schemas: Record<string, unknown>) {
-    const creationReq = {
-      type: 'object',
-      required: ['resourceId', 'amount', 'sourceKind'],
-      properties: {
-        resourceId: { type: 'string', description: '资源 ID' },
-        amount: { type: 'number', description: '数量' },
-        sourceKind: { type: 'string', enum: ['manual', 'timed', 'event', 'builtin'], description: '来源类别' },
-        reason: { type: 'string', description: '说明' },
-        idempotencyKey: { type: 'string', description: '幂等键' },
-      },
-    };
-    const reservationReq = {
-      type: 'object',
-      required: ['resourceId', 'amount'],
-      properties: {
-        resourceId: { type: 'string', description: '资源 ID' },
-        amount: { type: 'number', description: '占用数量' },
-        holderId: { type: 'string', description: '持有人' },
-        purpose: { type: 'string', description: '用途' },
-        holdUntil: { type: 'string', format: 'date-time', description: '持有期截止' },
-      },
-    };
-    const releaseReq = {
-      type: 'object',
-      properties: { amount: { type: 'number', description: '释放数量（缺省为全部）' }, reason: { type: 'string' } },
-    };
-    const settleReq = {
-      type: 'object',
-      properties: { amount: { type: 'number', description: '结算数量（缺省为全部）' }, reason: { type: 'string' } },
-    };
-    const consumptionReq = {
-      type: 'object',
-      required: ['resourceId', 'amount', 'sinkKind'],
-      properties: {
-        resourceId: { type: 'string', description: '资源 ID' },
-        amount: { type: 'number', description: '花费数量' },
-        sinkKind: { type: 'string', enum: ['manual', 'wear', 'event', 'builtin'], description: '去向类别' },
-        reason: { type: 'string', description: '说明' },
-        idempotencyKey: { type: 'string', description: '幂等键' },
-      },
-    };
-
-    schemas.CreationRequest = creationReq;
-    schemas.ReservationRequest = reservationReq;
-    schemas.ReleaseRequest = releaseReq;
-    schemas.SettleRequest = settleReq;
-    schemas.ConsumptionRequest = consumptionReq;
-
-    paths['/creations'] = {
-      post: {
-        tags: ['流转'],
-        summary: '创建（注入资源）',
-        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/CreationRequest' } } } },
-        responses: { '200': { description: '成功' } },
-      },
-    };
-    paths['/reservations'] = {
-      post: {
-        tags: ['流转'],
-        summary: '创建占用',
-        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/ReservationRequest' } } } },
-        responses: { '200': { description: '成功' } },
-      },
-    };
-    paths['/reservations/{id}/release'] = {
-      post: {
-        tags: ['流转'],
-        summary: '释放占用',
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        requestBody: { content: { 'application/json': { schema: { $ref: '#/components/schemas/ReleaseRequest' } } } },
-        responses: { '200': { description: '成功' } },
-      },
-    };
-    paths['/reservations/{id}/settle'] = {
-      post: {
-        tags: ['流转'],
-        summary: '结算占用为花费',
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        requestBody: { content: { 'application/json': { schema: { $ref: '#/components/schemas/SettleRequest' } } } },
-        responses: { '200': { description: '成功' } },
-      },
-    };
-    paths['/consumptions'] = {
-      post: {
-        tags: ['流转'],
-        summary: '直接花费',
-        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/ConsumptionRequest' } } } },
-        responses: { '200': { description: '成功' } },
-      },
-    };
-    paths['/resources/{resourceId}/ledger'] = {
-      get: {
-        tags: ['流转'],
-        summary: '查询流转明细',
-        parameters: [
-          { name: 'resourceId', in: 'path', required: true, schema: { type: 'string' } },
-          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
-          { name: 'pageSize', in: 'query', schema: { type: 'integer', default: 20 } },
-        ],
-        responses: { '200': { description: '查询成功' } },
-      },
-    };
   }
 }
